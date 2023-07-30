@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <ostream>
 #include <string_view>
 #include <unordered_map>
 
@@ -13,6 +14,7 @@ public:
     INVALID,
     END,
     SPACE,
+    ESCAPE,
     COMMENT,
     IDENTIFIER,
     LITERAL_START,
@@ -21,9 +23,40 @@ public:
     LITERAL_STR,
     LITERAL_END,
     KEYWORD_START,
-    KEYWORD_IF,
-    KEYWORD_WHILE,
+    KEYWORD_AUTO,
+    KEYWORD_BREAK,
+    KEYWORD_CASE,
+    KEYWORD_CHAR,
+    KEYWORD_CONST,
+    KEYWORD_CONTINUE,
+    KEYWORD_DEFAULT,
+    KEYWORD_DO,
+    KEYWORD_DOUBLE,
+    KEYWORD_ELSE,
+    KEYWORD_ENUM,
+    KEYWORD_EXTERN,
+    KEYWORD_FLOAT,
     KEYWORD_FOR,
+    KEYWORD_GOTO,
+    KEYWORD_IF,
+    KEYWORD_INLINE,
+    KEYWORD_INT,
+    KEYWORD_LONG,
+    KEYWORD_REGISTER,
+    KEYWORD_RESTRICT,
+    KEYWORD_RETURN,
+    KEYWORD_SHORT,
+    KEYWORD_SIGNED,
+    KEYWORD_SIZEOF,
+    KEYWORD_STATIC,
+    KEYWORD_STRUCT,
+    KEYWORD_SWITCH,
+    KEYWORD_TYPEDEF,
+    KEYWORD_UNION,
+    KEYWORD_UNSIGNED,
+    KEYWORD_VOID,
+    KEYWORD_VOLATILE,
+    KEYWORD_WHILE,
     KEYWORD_END,
     PUNCT_START,
     PUNCT_SEMICOLON,
@@ -70,10 +103,12 @@ public:
     PUNCT_GTEQ,
     PUNCT_GTGT,
     PUNCT_GTGTEQ,
+    PUNCT_ARROW,
     PUNCT_END,
   };
 
-  Token(Kind kind = EMPTY, const char *text = nullptr, size_t len = 0);
+  constexpr Token(Kind kind = EMPTY, const char *text = nullptr, size_t len = 0)
+      : kind(kind), text(text), textLen(len){};
 
   Kind kind;
   const char *text;
@@ -88,6 +123,14 @@ public:
     return c == ' ' || (c >= 9 && c <= 13);
   }
 
+  static constexpr bool isPunctuator(Kind kind) {
+    return kind >= PUNCT_START && kind <= PUNCT_END;
+  }
+
+  static constexpr bool isKeyword(Kind kind) {
+    return kind >= KEYWORD_START && kind <= KEYWORD_END;
+  }
+
   static constexpr const char *kindName(Kind kind) {
     switch (kind) {
     case EMPTY:
@@ -100,12 +143,8 @@ public:
       return "Space";
     case COMMENT:
       return "Comment";
-    case KEYWORD_WHILE:
-      return "Keyword";
     case IDENTIFIER:
       return "Ident";
-    case PUNCT_MINUS:
-      return "Punct";
     case LITERAL_NUM:
       return "Num";
     case LITERAL_CHAR:
@@ -115,6 +154,12 @@ public:
     default:
       break;
     }
+    if (isPunctuator(kind)) {
+      return "Punct";
+    }
+    if (isKeyword(kind)) {
+      return "Keyword";
+    }
     return "Unnamed";
   }
 
@@ -122,7 +167,7 @@ public:
     if (isNum(c)) {
       return LITERAL_NUM;
     }
-    if (isAlpha(c)) {
+    if (isAlpha(c) || c == '_') {
       return IDENTIFIER;
     }
     if (isSpace(c)) {
@@ -181,6 +226,8 @@ public:
       return PUNCT_PERCENT;
     case '?':
       return PUNCT_QUESTION;
+    case '\\':
+      return ESCAPE;
     }
     return INVALID;
   }
@@ -193,17 +240,19 @@ public:
     return a;
   }
 
-  explicit operator std::string_view() const { return {text, textLen}; }
-
-  bool isEmpty() const { return kind == EMPTY; }
-  bool isInvalid() const { return kind == INVALID; }
-  bool isEnd() const { return kind == END; }
-  bool isKeyword() const {
-    return kind >= KEYWORD_START && kind <= KEYWORD_END;
+  explicit operator std::string_view() const {
+    if (text == nullptr)
+      return {};
+    return {text, textLen};
   }
-  bool isPunctuator() const { return kind >= PUNCT_START && kind <= PUNCT_END; }
 
-  bool isString() const { return kind != INVALID && text != nullptr; }
+  bool isEmpty() const;
+  bool isInvalid() const;
+  bool isEnd() const;
+  bool isKeyword() const;
+  bool isPunctuator() const;
+
+  bool isValidString() const;
 };
 
 std::ostream &operator<<(std::ostream &os, Token tok);
@@ -213,96 +262,133 @@ public:
   Lexer(std::string_view input);
   Token nextToken();
   Token peekToken();
-  bool matchToken(Token tok);
+  void dropToken();
+  Token::Kind peekTokenKind();
+  bool matchNextToken(Token::Kind kind);
+  bool matchPeekToken(Token::Kind kind);
 
 private:
   static constexpr auto matchTable = Token::charTable();
+  static std::unordered_map<std::string_view, Token::Kind> keywords;
 
   std::string_view input;
   std::string_view::iterator currPos;
   Token currTok;
   unsigned char currChar;
-  // std::unordered_map<std::string, Token::Kind> keywords;
 
   void getToken();
-  bool eatToken();
+  void eatToken();
   bool getChar();
-  bool eatLiteralNum();
-  bool eatLiteralStr();
-  bool eatPlus();
-  bool eatMinus();
-  bool eatIdentifier();
-  bool eatLiteralChar();
-  bool eatPunctuator();
+  void eatChar();
+  void dropChar();
+
   const char *getPosPtr();
+  void probeKeyword();
+  void getPosToken(Token::Kind kind);
+
+  template <Token::Kind DELIM> void eatLiteralStr() {
+    dropChar();
+    getPosToken(DELIM);
+    while (getChar()) {
+      switch (matchTable[currChar]) {
+      case DELIM:
+        dropChar();
+        return;
+      case Token::ESCAPE:
+        eatChar();
+        if (!getChar())
+          break;
+        eatChar();
+        break;
+      default:
+        eatChar();
+        break;
+      }
+    }
+    currTok.kind = Token::INVALID;
+  }
+
+  void eatIdentifier(Token::Kind kind);
 
   template <Token::Kind BASE, Token::Kind REP = Token::EMPTY,
             Token::Kind EQ = Token::EMPTY, Token::Kind REPEQ = Token::EMPTY>
-  bool eatOperator() {
+  void eatOperator() {
     static_assert(REPEQ == Token::EMPTY || REP != Token::EMPTY,
                   "REP must be set to use REPEQ");
-    currTok = getPosToken(BASE, 1);
-    ++currPos;
+    getPosToken(BASE);
+    eatChar();
     if (!getChar()) {
-      return true;
+      return;
     }
     Token::Kind kind = matchTable[currChar];
 
     if constexpr (BASE == Token::PUNCT_EQ) {
       switch (kind) {
-      case Token::INVALID:
-        return false;
       case BASE:
         if constexpr (REP != Token::EMPTY) {
           currTok.kind = REP;
           break;
         }
-        return true;
+        return;
       default:
-        return true;
+        return;
       }
-    } else {
+    } else if constexpr (BASE == Token::PUNCT_MINUS) {
       switch (kind) {
-      case Token::INVALID:
-        return false;
       case BASE:
         if constexpr (REP != Token::EMPTY) {
           currTok.kind = REP;
           break;
         }
-        return true;
+        return;
       case Token::PUNCT_EQ:
         if constexpr (EQ != Token::EMPTY) {
           currTok.kind = EQ;
-          ++currTok.textLen;
-          ++currPos;
+          eatChar();
         }
-        return true;
+        return;
+      case Token::PUNCT_GT:
+        currTok.kind = Token::PUNCT_ARROW;
+        eatChar();
+        return;
       default:
-        return true;
+        return;
+      }
+    } else {
+      switch (kind) {
+      case BASE:
+        if constexpr (REP != Token::EMPTY) {
+          currTok.kind = REP;
+          break;
+        }
+        return;
+      case Token::PUNCT_EQ:
+        if constexpr (EQ != Token::EMPTY) {
+          currTok.kind = EQ;
+          eatChar();
+        }
+        return;
+      default:
+        return;
       }
     }
+    eatChar();
 
-    ++currTok.textLen;
-    ++currPos;
+    // Third character
     if constexpr (REPEQ == Token::EMPTY) {
-      return true;
+      return;
     }
     if (!getChar()) {
-      return true;
+      return;
     }
     kind = matchTable[currChar];
     switch (kind) {
-    case Token::INVALID:
-      return false;
     case Token::PUNCT_EQ:
       currTok.kind = REPEQ;
-      ++currTok.textLen;
-      ++currPos;
-      return true;
+      eatChar();
+      return;
     default:
-      return true;
+      return;
     }
   }
-  Token getPosToken(Token::Kind kind, size_t len);
 };

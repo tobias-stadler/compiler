@@ -1,13 +1,9 @@
 #include <Lexer.h>
-#include <ostream>
-#include <utility>
-
-Token::Token(Kind kind, const char *text, size_t len)
-    : kind(kind), text(text), textLen(len){};
+#include <string_view>
 
 std::ostream &operator<<(std::ostream &os, Token tok) {
   os << Token::kindName(tok.kind);
-  if (tok.isString()) {
+  if (tok.isValidString()) {
     os << '(' << std::string_view(tok) << ')';
   }
   return os;
@@ -17,7 +13,6 @@ Lexer::Lexer(std::string_view input) : input(input), currPos(input.begin()) {
   getToken();
 };
 
-
 bool Lexer::getChar() {
   if (currPos == input.end()) {
     return false;
@@ -26,129 +21,153 @@ bool Lexer::getChar() {
   return true;
 }
 
-bool Lexer::eatToken() {
+std::unordered_map<std::string_view, Token::Kind> Lexer::keywords = {
+    {"while", Token::KEYWORD_WHILE},
+    {"volatile", Token::KEYWORD_VOLATILE},
+    {"void", Token::KEYWORD_VOID},
+    {"unsigned", Token::KEYWORD_UNSIGNED},
+    {"union", Token::KEYWORD_UNION},
+    {"typedef", Token::KEYWORD_TYPEDEF},
+    {"switch", Token::KEYWORD_SWITCH},
+    {"struct", Token::KEYWORD_STRUCT},
+    {"static", Token::KEYWORD_STATIC},
+    {"sizeof", Token::KEYWORD_SIZEOF},
+    {"signed", Token::KEYWORD_SIGNED},
+    {"short", Token::KEYWORD_SHORT},
+    {"return", Token::KEYWORD_RETURN},
+    {"restrict", Token::KEYWORD_RESTRICT},
+    {"register", Token::KEYWORD_REGISTER},
+    {"long", Token::KEYWORD_LONG},
+    {"int", Token::KEYWORD_INT},
+    {"inline", Token::KEYWORD_INLINE},
+    {"if", Token::KEYWORD_IF},
+    {"goto", Token::KEYWORD_GOTO},
+    {"for", Token::KEYWORD_FOR},
+    {"float", Token::KEYWORD_FLOAT},
+    {"extern", Token::KEYWORD_EXTERN},
+    {"enum", Token::KEYWORD_ENUM},
+    {"else", Token::KEYWORD_ELSE},
+    {"double", Token::KEYWORD_DOUBLE},
+    {"do", Token::KEYWORD_DO},
+    {"default", Token::KEYWORD_DEFAULT},
+    {"continue", Token::KEYWORD_CONTINUE},
+    {"const", Token::KEYWORD_CONST},
+    {"char", Token::KEYWORD_CHAR},
+    {"case", Token::KEYWORD_CASE},
+    {"break", Token::KEYWORD_BREAK},
+    {"auto", Token::KEYWORD_AUTO},
+};
+
+void Lexer::eatToken() {
   while (getChar()) {
     Token::Kind kind = matchTable[currChar];
     switch (kind) {
-    case Token::INVALID:
-      return false;
-    case Token::LITERAL_NUM:
-      return eatLiteralNum();
+    default:
+      getPosToken(Token::INVALID);
+      eatChar();
+      return;
     case Token::LITERAL_STR:
-      ++currPos;
-      return eatLiteralStr();
+      eatLiteralStr<Token::LITERAL_STR>();
+      return;
     case Token::LITERAL_CHAR:
-      ++currPos;
-      return eatLiteralChar();
+      eatLiteralStr<Token::LITERAL_CHAR>();
+      return;
     case Token::IDENTIFIER:
-      return eatIdentifier();
+    case Token::LITERAL_NUM:
+      eatIdentifier(kind);
+      probeKeyword();
+      return;
     case Token::SPACE:
-      ++currPos;
+      dropChar();
       continue;
     case Token::PUNCT_PLUS:
-      return eatOperator<Token::PUNCT_PLUS, Token::PUNCT_PLUSPLUS, Token::PUNCT_PLUSEQ>();
+      eatOperator<Token::PUNCT_PLUS, Token::PUNCT_PLUSPLUS,
+                  Token::PUNCT_PLUSEQ>();
+      return;
     case Token::PUNCT_MINUS:
-      return eatOperator<Token::PUNCT_MINUS, Token::PUNCT_MINUSMINUS, Token::PUNCT_MINUSEQ>();
+      eatOperator<Token::PUNCT_MINUS, Token::PUNCT_MINUSMINUS,
+                  Token::PUNCT_MINUSEQ>();
+      return;
     case Token::PUNCT_OR:
-      return eatOperator<Token::PUNCT_OR, Token::PUNCT_OROR, Token::PUNCT_OREQ>();
+      eatOperator<Token::PUNCT_OR, Token::PUNCT_OROR, Token::PUNCT_OREQ>();
+      return;
     case Token::PUNCT_AND:
-      return eatOperator<Token::PUNCT_AND, Token::PUNCT_ANDAND, Token::PUNCT_ANDEQ>();
+      eatOperator<Token::PUNCT_AND, Token::PUNCT_ANDAND, Token::PUNCT_ANDEQ>();
+      return;
     case Token::PUNCT_STAR:
-      return eatOperator<Token::PUNCT_STAR, Token::EMPTY, Token::PUNCT_STAREQ>();
+      eatOperator<Token::PUNCT_STAR, Token::EMPTY, Token::PUNCT_STAREQ>();
+      return;
     case Token::PUNCT_EQ:
-      return eatOperator<Token::PUNCT_EQ, Token::PUNCT_EQEQ>();
+      eatOperator<Token::PUNCT_EQ, Token::PUNCT_EQEQ>();
+      return;
     case Token::PUNCT_EXCLAMATION:
-      return eatOperator<Token::PUNCT_EXCLAMATION, Token::EMPTY, Token::PUNCT_EXCLAMATIONEQ>();
+      eatOperator<Token::PUNCT_EXCLAMATION, Token::EMPTY,
+                  Token::PUNCT_EXCLAMATIONEQ>();
+      return;
     case Token::PUNCT_XOR:
-      return eatOperator<Token::PUNCT_XOR, Token::EMPTY, Token::PUNCT_XOREQ>();
+      eatOperator<Token::PUNCT_XOR, Token::EMPTY, Token::PUNCT_XOREQ>();
+      return;
     case Token::PUNCT_SLASH:
-      return eatOperator<Token::PUNCT_SLASH, Token::EMPTY, Token::PUNCT_SLASHEQ>();
+      eatOperator<Token::PUNCT_SLASH, Token::EMPTY, Token::PUNCT_SLASHEQ>();
+      return;
     case Token::PUNCT_PERCENT:
-      return eatOperator<Token::PUNCT_PERCENT, Token::EMPTY, Token::PUNCT_PERCENTEQ>();
+      eatOperator<Token::PUNCT_PERCENT, Token::EMPTY, Token::PUNCT_PERCENTEQ>();
+      return;
     case Token::PUNCT_LT:
-      return eatOperator<Token::PUNCT_LT, Token::PUNCT_LTLT, Token::PUNCT_LTEQ, Token::PUNCT_LTLTEQ>();
+      eatOperator<Token::PUNCT_LT, Token::PUNCT_LTLT, Token::PUNCT_LTEQ,
+                  Token::PUNCT_LTLTEQ>();
+      return;
     case Token::PUNCT_GT:
-      return eatOperator<Token::PUNCT_GT, Token::PUNCT_GTGT, Token::PUNCT_GTEQ, Token::PUNCT_GTGTEQ>();
-    default:
-      // Single character token
-      currTok = getPosToken(kind, 1);
-      ++currPos;
-      return true;
+      eatOperator<Token::PUNCT_GT, Token::PUNCT_GTGT, Token::PUNCT_GTEQ,
+                  Token::PUNCT_GTGTEQ>();
+      return;
+    case Token::PUNCT_CURLYO:
+    case Token::PUNCT_CURLYC:
+    case Token::PUNCT_SQUAREO:
+    case Token::PUNCT_SQUAREC:
+    case Token::PUNCT_PARENO:
+    case Token::PUNCT_PARENC:
+    case Token::PUNCT_COLON:
+    case Token::PUNCT_SEMICOLON:
+    case Token::PUNCT_QUESTION:
+    case Token::PUNCT_COMMA:
+    case Token::PUNCT_DOT:
+    case Token::PUNCT_TILDE:
+      getPosToken(kind);
+      eatChar();
+      return;
     }
   }
   currTok = Token(Token::END);
-  return true;
 }
 
-
-bool Lexer::eatLiteralNum() {
-  currTok = Token(Token::LITERAL_NUM, &currPos[0], 0);
-  while (getChar()) {
-    switch (matchTable[currChar]) {
-    case Token::LITERAL_NUM:
-      ++currPos;
-      currTok.textLen++;
-      break;
-    case Token::INVALID:
-      return false;
-    default:
-      return true;
-    }
-  }
-  return true;
-}
-
-bool Lexer::eatLiteralStr() {
-  currTok = Token(Token::LITERAL_STR, &currPos[0], 0);
-  while (getChar()) {
-    switch (matchTable[currChar]) {
-    case Token::LITERAL_STR:
-      ++currPos;
-      return true;
-    default:
-      ++currPos;
-      ++currTok.textLen;
-      break;
-    }
-  }
-  return true;
-}
-
-bool Lexer::eatLiteralChar() {
-  // currTok = Token(Token::LITERAL_CHAR, &currPos[0], 0);
-  return false;
-}
-
-bool Lexer::eatIdentifier() {
-  currTok = getPosToken(Token::IDENTIFIER, 0);
+void Lexer::eatIdentifier(Token::Kind kind) {
+  getPosToken(kind);
   while (getChar()) {
     switch (matchTable[currChar]) {
     case Token::IDENTIFIER:
     case Token::LITERAL_NUM:
-      ++currPos;
-      currTok.textLen++;
+      eatChar();
       break;
-    case Token::INVALID:
-      return false;
     default:
-      return true;
+      return;
     }
   }
-  return true;
+}
+
+void Lexer::probeKeyword() {
+  if (!currTok.isValidString())
+    return;
+  if (auto i = keywords.find(std::string_view(currTok)); i != keywords.end()) {
+    currTok.kind = i->second;
+  }
 }
 
 void Lexer::getToken() {
   if (currTok.isEnd()) {
     return;
   }
-  if (currTok.isInvalid()) {
-    currTok = Token(Token::END);
-    return;
-  }
-
-  if (!eatToken()) {
-    currTok = Token(Token::INVALID);
-  }
+  eatToken();
 }
 
 Token Lexer::peekToken() { return currTok; }
@@ -159,8 +178,44 @@ Token Lexer::nextToken() {
   return tok;
 }
 
+bool Lexer::matchPeekToken(Token::Kind kind) {
+  if (currTok.kind != kind)
+    return false;
+
+  return true;
+}
+
+bool Lexer::matchNextToken(Token::Kind kind) {
+  if (currTok.kind != kind)
+    return false;
+
+  getToken();
+  return true;
+}
+
 const char *Lexer::getPosPtr() { return &currPos[0]; }
 
-Token Lexer::getPosToken(Token::Kind kind, size_t len) {
-  return Token(kind, getPosPtr(), len);
+void Lexer::getPosToken(Token::Kind kind) {
+  currTok = Token(kind, getPosPtr());
 }
+
+bool Token::isEmpty() const { return kind == EMPTY; }
+
+bool Token::isInvalid() const { return kind == INVALID; }
+
+bool Token::isEnd() const { return kind == END; }
+
+bool Token::isKeyword() const { return isKeyword(kind); }
+
+bool Token::isPunctuator() const { return isPunctuator(kind); }
+
+bool Token::isValidString() const { return text && textLen > 0; }
+
+Token::Kind Lexer::peekTokenKind() { return currTok.kind; };
+void Lexer::dropChar() { ++currPos; }
+
+void Lexer::eatChar() {
+  ++currPos;
+  ++currTok.textLen;
+}
+void Lexer::dropToken() { getToken(); }
