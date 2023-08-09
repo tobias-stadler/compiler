@@ -1,5 +1,6 @@
-#include "Lexer.h"
-#include "Parser.h"
+#include <frontend/AST.h>
+#include <frontend/Lexer.h>
+#include <frontend/Parser.h>
 #include <fstream>
 #include <iostream>
 #include <string>

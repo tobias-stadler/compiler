@@ -1,4 +1,4 @@
-#include <Lexer.h>
+#include <frontend/Lexer.h>
 #include <string_view>
 
 std::ostream &operator<<(std::ostream &os, Token tok) {

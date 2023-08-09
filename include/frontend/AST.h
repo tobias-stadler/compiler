@@ -1,15 +1,8 @@
 #pragma once
-#include <Lexer.h>
 #include <array>
-#include <cassert>
-#include <charconv>
+#include <assert.h>
 #include <cstdint>
-#include <initializer_list>
 #include <iostream>
-#include <memory>
-#include <shared_mutex>
-#include <stdexcept>
-#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -18,21 +11,52 @@ class AST {
 public:
   enum Kind {
     EMPTY,
-    MUL,
+    ASSIGN,
+    ASSIGN_ADD,
+    ASSIGN_SUB,
+    ASSIGN_MUL,
+    ASSIGN_DIV,
+    ASSIGN_MOD,
+    ASSIGN_AND,
+    ASSIGN_OR,
+    ASSIGN_XOR,
+    ASSIGN_LSHIFT,
+    ASSIGN_RSHIFT,
+    INC_PRE,
+    INC_POST,
+    DEC_PRE,
+    DEC_POST,
     ADD,
     SUB,
+    MUL,
     DIV,
-    ASSIGN,
-    EQUAL,
+    MOD,
     BIT_AND,
     BIT_OR,
+    BIT_NOT,
+    BIT_XOR,
+    LSHIFT,
+    RSHIFT,
     LOG_AND,
     LOG_OR,
+    LOG_NOT,
     VAR,
     NUM,
+    EQ,
+    NEQ,
+    LT,
+    GT,
+    LTE,
+    GTE,
     ST_COMPOUND,
     ST_IF,
     ST_WHILE,
+    DEREF,
+    ADDR,
+    DECL_PTR,
+    DECL_IDENT,
+    DECL_FUN,
+    DECL_ARR,
   };
   Kind kind;
 
@@ -48,6 +72,12 @@ public:
       return "Var";
     case NUM:
       return "Num";
+    case INC_PRE:
+      return "IncPre";
+    case DEREF:
+      return "Deref";
+    case ADDR:
+      return "Addr";
     default:
       return "Unnamed";
     }
@@ -160,11 +190,23 @@ public:
   AST &getStatement() { return getChild(1); }
 };
 
-class ParserException : public std::runtime_error {
+class IdentDeclAST : public AST {
 public:
-  ParserException(const std::string &arg)
-      : std::runtime_error("Parser: " + arg) {}
+  std::string_view varName;
+  IdentDeclAST(std::string_view varName) : AST(DECL_IDENT), varName(varName) {}
 };
+
+class PtrDeclAST : public ArrAST<1> {
+public:
+  PtrDeclAST(AST *decl) : ArrAST(DECL_PTR, {decl}) {}
+  AST &getSubDecl() { return getChild(0); }
+};
+
+class FunDeclAST : public ArrAST<1> {};
+
+class ArrDeclAST : public ArrAST<1> {};
+
+class TypeSpecAST : public ArrAST<1> {};
 
 #define VISIT_DELEGATE(AstTy)                                                  \
   impl()->visit##AstTy(*static_cast<AstTy##AST *>(ast));
@@ -190,12 +232,21 @@ protected:
     case AST::SUB:
     case AST::DIV:
     case AST::ASSIGN:
-    case AST::EQUAL:
     case AST::BIT_AND:
     case AST::BIT_OR:
     case AST::LOG_AND:
     case AST::LOG_OR:
       VISIT_DELEGATE(Binop);
+      break;
+    case AST::INC_PRE:
+    case AST::INC_POST:
+    case AST::DEC_PRE:
+    case AST::DEC_POST:
+    case AST::ADDR:
+    case AST::DEREF:
+    case AST::BIT_NOT:
+    case AST::LOG_NOT:
+      VISIT_DELEGATE(Unop);
       break;
     case AST::VAR:
       VISIT_DELEGATE(Var);
@@ -251,6 +302,12 @@ public:
 
   void visitNum(NumAST &ast) { std::cout << "Num(" << ast.num << ")"; }
 
+  void visitUnop(UnopAST &ast) {
+    std::cout << "Unop(" << AST::kindName(ast.kind);
+    std::cout << ",";
+    dispatch(ast.getSubExpression());
+    std::cout << ")";
+  }
   void visitBinop(BinopAST &ast) {
     std::cout << "Binop(" << AST::kindName(ast.kind);
     for (AST *child : ast.children) {
@@ -280,183 +337,10 @@ public:
     }
   }
 
-  void visistWhileSt(WhileStAST &ast) {
+  void visitWhileSt(WhileStAST &ast) {
     std::cout << "while(";
     dispatch(ast.getExpression());
     std::cout << ")\n";
     dispatch(ast.getStatement());
-  }
-};
-
-class Parser {
-public:
-  Parser(Lexer *lex) : lex(lex) { assert(lex); }
-
-public:
-  static constexpr AST::Kind tokenBinopKind(Token::Kind kind) {
-    switch (kind) {
-    default:
-      return AST::EMPTY;
-    case Token::PUNCT_STAR:
-      return AST::MUL;
-    case Token::PUNCT_PLUS:
-      return AST::ADD;
-    case Token::PUNCT_MINUS:
-      return AST::SUB;
-    }
-  }
-
-  static constexpr int tokenPrecedence(Token::Kind kind) {
-    switch (kind) {
-    case Token::PUNCT_STAR:
-      return 3;
-    case Token::PUNCT_PLUS:
-    case Token::PUNCT_MINUS:
-      return 2;
-    default:
-      return -1;
-    }
-  }
-
-  static constexpr bool precedenceRightAssoc(int prec) {
-    switch (prec) {
-    default:
-      return false;
-    }
-  }
-
-  Lexer *lex;
-
-  AST *parseLiteralNum() {
-    Token tok = lex->nextToken();
-    if (tok.kind != Token::LITERAL_NUM) {
-      return error("Expected literal num", tok);
-    }
-    std::string_view str(tok);
-    int64_t num;
-    auto res = std::from_chars(str.data(), str.data() + str.size(), num);
-    if (res.ec != std::errc{}) {
-      return error("Invalid num", tok);
-    }
-    return new NumAST(num);
-  }
-
-  AST *error(std::string_view str, Token tok = Token::EMPTY) {
-    std::cerr << "[Error][Parser] " << str;
-    if (!tok.isEmpty()) {
-      std::cerr << "; Exceptional Token: " << tok;
-    }
-    std::cerr << '\n';
-    return nullptr;
-  }
-
-  AST *parseStatement() {
-    switch (lex->peekTokenKind()) {
-    case Token::PUNCT_CURLYO: {
-      lex->dropToken();
-      auto *st = new CompoundStAST();
-      for (AST *subSt; (subSt = parseStatement());) {
-        st->children.push_back(subSt);
-      }
-      if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {
-        delete st;
-        return error("Expected closing curly after compund statement");
-      }
-      return st;
-    }
-    case Token::KEYWORD_IF: {
-      lex->dropToken();
-      if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
-        return error("Expected opening paren after if keyword");
-      }
-      auto *expr = parseExpression();
-      if (!expr) {
-        return error("Expected expression after if keyword");
-      }
-      if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-        delete expr;
-        return error("Expected closing paren after if expression");
-      }
-      auto *st = parseStatement();
-      if (!st) {
-        delete expr;
-        return error("Expected statment after if");
-      }
-      AST *stElse = nullptr;
-      if (lex->matchNextToken(Token::KEYWORD_ELSE) &&
-          !(stElse = parseStatement())) {
-        delete expr;
-        delete st;
-        return error("Expected statement after else");
-      }
-      return new IfStAST(expr, st, stElse);
-    }
-    case Token::KEYWORD_WHILE: {
-      lex->dropToken();
-      if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
-        return error("Expected opening paren after while keyword");
-      }
-      auto *expr = parseExpression();
-      if (!expr) {
-        return error("Expected expression after while keyword");
-      }
-      if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-        delete expr;
-        return error("Expected closing paren after while expression");
-      }
-      auto *st = parseStatement();
-      if (!st) {
-        delete expr;
-        return error("Expected statment after while");
-      }
-      return new WhileStAST(expr, st);
-    }
-    default: {
-      auto *st = parseExpression();
-      if (!st) {
-        return nullptr;
-      }
-      if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-        delete st;
-        return error("Expected semicolon after expression statement");
-      }
-      return st;
-    }
-    }
-  }
-
-  AST *parseExpression(int prec = 0) {
-    AST *lhs = parsePrimary();
-    while (true) {
-      Token::Kind tokKind = lex->peekTokenKind();
-      int tokPrec = tokenPrecedence(tokKind);
-      if (tokPrec < prec) {
-        return lhs;
-      }
-      lex->dropToken();
-      AST *rhs = parseExpression(precedenceRightAssoc(tokPrec) ? tokPrec
-                                                               : tokPrec + 1);
-      lhs = new BinopAST(tokenBinopKind(tokKind), lhs, rhs);
-    }
-  }
-
-  AST *parseType() { return nullptr; }
-
-  AST *parsePrimary() {
-    if (lex->matchNextToken(Token::PUNCT_PARENO)) {
-      AST *ex = parseExpression();
-      if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-        delete ex;
-        return error("Expected closing paren", lex->peekToken());
-      }
-      return ex;
-    }
-    if (lex->matchPeekToken(Token::IDENTIFIER)) {
-      return new VarAST(std::string_view(lex->nextToken()));
-    }
-    if (lex->matchPeekToken(Token::LITERAL_NUM)) {
-      return parseLiteralNum();
-    }
-    return nullptr;
   }
 };
