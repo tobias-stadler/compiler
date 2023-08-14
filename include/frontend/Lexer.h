@@ -131,6 +131,8 @@ public:
     return kind >= KEYWORD_START && kind <= KEYWORD_END;
   }
 
+  static constexpr int NUM_KEYWORDS = KEYWORD_END - KEYWORD_START - 1;
+
   static constexpr const char *kindName(Kind kind) {
     switch (kind) {
     case EMPTY:

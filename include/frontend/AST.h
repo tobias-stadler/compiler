@@ -1,4 +1,6 @@
 #pragma once
+#include "frontend/Type.h"
+#include "support/RefCount.h"
 #include <array>
 #include <assert.h>
 #include <cstdint>
@@ -57,6 +59,7 @@ public:
     DECL_IDENT,
     DECL_FUN,
     DECL_ARR,
+    DECL_SPEC,
   };
   Kind kind;
 
@@ -206,7 +209,16 @@ class FunDeclAST : public ArrAST<1> {};
 
 class ArrDeclAST : public ArrAST<1> {};
 
-class TypeSpecAST : public ArrAST<1> {};
+class DeclSpecAST : public AST {
+public:
+  DeclSpecAST(Symbol::Kind symbolKind, Type::Kind typeKind,
+              Type::Qualifier qualifier)
+      : AST(DECL_SPEC), symbolKind(symbolKind), typeKind(typeKind),
+        qualifier(qualifier) {}
+  Symbol::Kind symbolKind;
+  Type::Kind typeKind;
+  Type::Qualifier qualifier;
+};
 
 #define VISIT_DELEGATE(AstTy)                                                  \
   impl()->visit##AstTy(*static_cast<AstTy##AST *>(ast));

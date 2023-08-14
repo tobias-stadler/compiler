@@ -1,4 +1,8 @@
+#include "frontend/Type.h"
+#include "support/RefCount.h"
+#include <array>
 #include <frontend/Parser.h>
+#include <memory>
 
 AST *Parser::parsePrimary() {
   Token::Kind tokKind = lex->peekTokenKind();
@@ -161,6 +165,7 @@ Parser::Parser(Lexer *lex) : lex(lex) { assert(lex); }
 AST *Parser::parseDeclarator() {
   switch (lex->peekTokenKind()) {
   case Token::PUNCT_STAR: {
+    lex->dropToken();
     auto *decl = parseDeclarator();
     if (!decl) {
       return error("Expected decl after ptr-decl");
@@ -171,6 +176,7 @@ AST *Parser::parseDeclarator() {
     return new IdentDeclAST(std::string_view(lex->nextToken()));
   }
   case Token::PUNCT_PARENO: {
+    lex->dropToken();
     auto *decl = parseDeclarator();
     if (!decl) {
       return error("Expected decl after opening paren");
@@ -184,23 +190,6 @@ AST *Parser::parseDeclarator() {
   default:
     return nullptr;
   }
-}
-
-AST *Parser::parseTypeSpec() {
-  switch (lex->peekTokenKind()) {
-  default:
-    return nullptr;
-  case Token::KEYWORD_CHAR:
-    break;
-  case Token::KEYWORD_SHORT:
-    break;
-  case Token::KEYWORD_INT:
-    break;
-  case Token::KEYWORD_LONG:
-    break;
-  }
-
-  return nullptr;
 }
 
 AST *Parser::parseDeclaration() { return nullptr; }
