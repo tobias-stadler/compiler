@@ -16,14 +16,13 @@ int main() {
     }
     Lexer lexP{line};
     Parser p{&lexP};
-    AST *ast = p.parseStatement();
+    auto ast = p.parseDeclarator(true);
     if (!ast) {
       std::cout << "Parsing failed\n";
       continue;
     }
     std::cout << "Parsing finished\n";
-    PrintASTVisitor().run(ast);
-    delete ast;
+    PrintASTVisitor().run(&ast.res());
   }
   return 0;
 }

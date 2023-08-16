@@ -1,5 +1,6 @@
 #pragma once
 #include "frontend/Type.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <charconv>
@@ -14,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 class Parser {
@@ -162,27 +164,43 @@ public:
 
   Lexer *lex;
 
-  AST *parseLiteralNum();
+  ASTPtrResult parseLiteralNum();
 
-  AST *error(std::string_view str, Token tok = Token::EMPTY);
+  ASTError error(std::string_view str, Token tok = Token::EMPTY);
+  ASTError nop() { return ASTError(ASTError::NOP); };
 
-  AST *parseStatement();
+  bool nextIsAbstractDeclarator() {
+    switch (lex->peekTokenKind()) {
+    case Token::PUNCT_STAR:
+    case Token::PUNCT_PARENO:
+    case Token::PUNCT_SQUAREO:
+      return true;
+    default:
+      return false;
+    }
+  }
 
-  AST *parseExpression(int prec = 1);
+  ASTPtrResult parseStatement();
 
-  AST *parsePrimary();
+  ASTPtrResult parseExpression(int prec = 1);
 
-  AST *parseDeclaration();
+  ASTPtrResult parsePrimary();
 
-  AST *parseDeclarator();
+  ASTPtrResult parseDeclaration();
+
+  ASTResult<DeclaratorAST> parseDeclarator(bool abstract);
+  ASTResult<DeclaratorAST> parseDirectDeclarator(bool abstract);
+  ASTResult<DeclaratorAST> parseSingleDirectDeclarator(bool abstract,
+                                                       bool first);
+  ASTResult<DeclaratorAST> parseDeclaratorPostfix();
 
   template <bool enableType = true, bool enableQuali = true,
             bool enableStorage = true>
-  AST *parseDeclSpec() {
+  ASTResult<DeclSpec> parseDeclSpec() {
     Type::Kind typeKind = Type::EMPTY;
     Type::Qualifier qualifier = Type::Qualifier();
     Symbol::Kind storageKind = Symbol::EMPTY;
-    std::array<unsigned, Token::NUM_KEYWORDS> keys = {};
+    std::array<unsigned, 100> keys = {};
     unsigned totalType = 0, totalStorage = 0;
     while (true) {
       Token::Kind kind = lex->peekTokenKind();
@@ -222,7 +240,7 @@ public:
           goto done;
         }
       }
-      ++keys[kind - Token::KEYWORD_START - 1];
+      ++keys[kind];
       lex->dropToken();
     }
   done:
@@ -266,6 +284,6 @@ public:
                                   keys[Token::KEYWORD_RESTRICT] > 0,
                                   keys[Token::KEYWORD_VOLATILE] > 0);
     }
-    return new DeclSpecAST(storageKind, typeKind, qualifier);
+    return DeclSpec(storageKind, typeKind, qualifier);
   }
 };

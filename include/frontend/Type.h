@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <string>
 #include <utility>
@@ -26,10 +27,12 @@ public:
     ULONG,
     ULONGLONG,
     BASIC_END,
+    DERIVED_START,
     ARR,
     STRUCT,
     FUNC,
-    PTR
+    PTR,
+    DERIVED_END
   };
   class Qualifier {
   public:
@@ -54,15 +57,31 @@ public:
     return kind > BASIC_START && kind < BASIC_END;
   }
 
+  static bool isDerived(Kind kind) {
+    return kind > DERIVED_START && kind < DERIVED_END;
+  }
+
   static constexpr int NUM_BASIC = BASIC_END - BASIC_START - 1;
 
 protected:
-  Type(Kind kind, Qualifier qualifier = Qualifier())
-      : kind(kind), qualifier(qualifier) {}
+  Type(Kind kind, Qualifier qualifier) : kind(kind), qualifier(qualifier) {}
 
 private:
   Kind kind;
   Qualifier qualifier;
+};
+
+class DerivedType : public Type {
+public:
+  DerivedType(Kind kind, CountedPtr<Type> baseType, Qualifier qualifier)
+      : Type(kind, qualifier), baseType(baseType) {}
+
+  Type &getBaseType() { return *baseType; }
+
+  void setBaseType(CountedPtr<Type> newBase) { baseType = std::move(newBase); }
+
+private:
+  CountedPtr<Type> baseType;
 };
 
 class BasicType : public Type {
@@ -71,45 +90,34 @@ public:
   static CountedPtr<BasicType> create(Kind kind, Qualifier qualifier);
 };
 
-class PtrType : public Type {
+class PtrType : public DerivedType {
 public:
-  PtrType(CountedPtr<Type> referencedType)
-      : Type(PTR), referencedType(std::move(referencedType)) {}
-
-  Type &getReferencedType() { return *referencedType; }
-
-private:
-  CountedPtr<Type> referencedType;
+  PtrType(Qualifier qualifier) : DerivedType(PTR, nullptr, qualifier) {}
 };
 
-class ArrType : public Type {
+class ArrType : public DerivedType {
 public:
-  ArrType(CountedPtr<Type> elementType)
-      : Type(ARR), elementType(std::move(elementType)) {}
-  Type &getElementType() { return *elementType; }
-
-private:
-  CountedPtr<Type> elementType;
+  ArrType() : DerivedType(ARR, nullptr, Qualifier()) {}
 };
 
-class FuncType : public Type {
+class FuncType : public DerivedType {
 public:
-  FuncType() : Type(FUNC) {}
-  Type &getRetType() { return *retType; }
-  Type &gerParamType(size_t i) { return *paramTypes[i]; }
+  FuncType() : DerivedType(FUNC, nullptr, Qualifier()) {}
+  Type &getParamType(size_t i) { return *paramTypes[i]; }
   size_t getNumParams() { return paramTypes.size(); };
   void addParam(CountedPtr<Type> type) {
     paramTypes.push_back(std::move(type));
   }
 
+  auto &getParamTypes() { return paramTypes; }
+
 private:
-  CountedPtr<Type> retType;
   std::vector<CountedPtr<Type>> paramTypes;
 };
 
 class StructType : public Type {
 public:
-  StructType() : Type(STRUCT) {}
+  StructType() : Type(STRUCT, Qualifier()) {}
 
   Type *getNamedMemberType(std::string_view v) {
     auto it = memberIndex.find(v);

@@ -1,5 +1,6 @@
 #pragma once
 #include <cassert>
+#include <cstddef>
 #include <memory>
 #include <utility>
 
@@ -23,6 +24,7 @@ template <typename T> class CountedPtr {
 
 public:
   CountedPtr() = default;
+  CountedPtr(std::nullptr_t) {}
   CountedPtr(T *ptr) : mPtr(ptr) {
     if (mPtr) {
       mPtr->incRefCount();
