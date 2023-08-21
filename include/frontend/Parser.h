@@ -169,16 +169,7 @@ public:
   ASTError error(std::string_view str, Token tok = Token::EMPTY);
   ASTError nop() { return ASTError(ASTError::NOP); };
 
-  bool nextIsAbstractDeclarator() {
-    switch (lex->peekTokenKind()) {
-    case Token::PUNCT_STAR:
-    case Token::PUNCT_PARENO:
-    case Token::PUNCT_SQUAREO:
-      return true;
-    default:
-      return false;
-    }
-  }
+  bool nextIsAbstractDeclarator();
 
   ASTPtrResult parseStatement();
 
@@ -192,11 +183,15 @@ public:
   ASTResult<DeclaratorAST> parseDirectDeclarator(bool abstract);
   ASTResult<DeclaratorAST> parseSingleDirectDeclarator(bool abstract,
                                                        bool first);
-  ASTResult<DeclaratorAST> parseDeclaratorPostfix();
+
+  ASTPtrResult parseBlockItem();
+  ASTPtrResult parseCompoundStatement();
+  ASTPtrResult parseTranslationUnit();
 
   template <bool enableType = true, bool enableQuali = true,
             bool enableStorage = true>
   ASTResult<DeclSpec> parseDeclSpec() {
+    bool isNop = true;
     Type::Kind typeKind = Type::EMPTY;
     Type::Qualifier qualifier = Type::Qualifier();
     Symbol::Kind storageKind = Symbol::EMPTY;
@@ -242,8 +237,12 @@ public:
       }
       ++keys[kind];
       lex->dropToken();
+      isNop = false;
     }
   done:
+    if (isNop) {
+      return nop();
+    }
     if constexpr (enableType) {
       if (totalType == 1) {
         if (keys[Token::KEYWORD_VOID] == 1) {
@@ -264,19 +263,22 @@ public:
       }
     }
     if constexpr (enableStorage) {
-      if (totalStorage != 1) {
-        return error("Multiple storage specifiers not allowed");
-      }
-      if (keys[Token::KEYWORD_AUTO] == 1) {
+      if (totalStorage == 0) {
         storageKind = Symbol::AUTO;
-      } else if (keys[Token::KEYWORD_STATIC] == 1) {
-        storageKind = Symbol::STATIC;
-      } else if (keys[Token::KEYWORD_TYPEDEF] == 1) {
-        storageKind = Symbol::TYPE;
-      } else if (keys[Token::KEYWORD_REGISTER] == 1) {
-        storageKind = Symbol::REGISTER;
+      } else if (totalStorage == 1) {
+        if (keys[Token::KEYWORD_AUTO] == 1) {
+          storageKind = Symbol::AUTO;
+        } else if (keys[Token::KEYWORD_STATIC] == 1) {
+          storageKind = Symbol::STATIC;
+        } else if (keys[Token::KEYWORD_TYPEDEF] == 1) {
+          storageKind = Symbol::TYPE;
+        } else if (keys[Token::KEYWORD_REGISTER] == 1) {
+          storageKind = Symbol::REGISTER;
+        } else {
+          return error("Invalid storage specifier ");
+        }
       } else {
-        return error("Invalid storage specifier ");
+        return error("Multiple storage specifiers not allowed");
       }
     }
     if constexpr (enableQuali) {

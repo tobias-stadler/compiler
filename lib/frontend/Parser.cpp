@@ -65,15 +65,7 @@ ASTPtrResult Parser::parseExpression(int prec) {
 ASTPtrResult Parser::parseStatement() {
   switch (lex->peekTokenKind()) {
   case Token::PUNCT_CURLYO: {
-    lex->dropToken();
-    auto st = std::make_unique<CompoundStAST>();
-    for (ASTPtrResult subSt; (subSt = parseStatement());) {
-      st->children.push_back(subSt);
-    }
-    if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {
-      return error("Expected closing curly after compund statement");
-    }
-    return st;
+    return parseCompoundStatement();
   }
   case Token::KEYWORD_IF: {
     lex->dropToken();
@@ -245,20 +237,92 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
 
 ASTPtrResult Parser::parseDeclaration() {
   auto spec = parseDeclSpec();
+  if (spec.isNop()) {
+    return nop();
+  }
   if (!spec) {
     return error("Expected declaration specifiers");
   }
+
   auto res = std::make_unique<DeclarationAST>();
   CountedPtr<Type> type = spec->createType();
   do {
-    auto decl = parseDeclarator(true);
+    auto decl = parseDeclarator(false);
     if (!decl) {
       return error("Expected valid declarator");
     }
     decl->spliceEnd(DeclaratorAST(type, nullptr));
+    res->declarators.push_back(std::move(*decl));
+    if (lex->peekTokenKind() == Token::PUNCT_CURLYO) {
+      auto st = parseCompoundStatement();
+      if (!st) {
+        return error("Expected compound statement in function definition");
+      }
+      res->st = st;
+      return res;
+    }
   } while (lex->matchNextToken(Token::PUNCT_COMMA));
   if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
     return error("Expected semicolon after declaration");
   }
   return res;
 }
+
+ASTPtrResult Parser::parseTranslationUnit() {
+  auto tu = std::make_unique<TranslationUnitAST>();
+  while (true) {
+    auto decl = parseDeclaration();
+    if (decl) {
+      tu->declarations.push_back(decl);
+    } else if (decl.isNop()) {
+      return tu;
+    } else {
+      return error("Expected declaration");
+    }
+  }
+}
+
+ASTPtrResult Parser::parseCompoundStatement() {
+  if (lex->peekTokenKind() != Token::PUNCT_CURLYO) {
+    return nop();
+  }
+  lex->dropToken();
+  auto st = std::make_unique<CompoundStAST>();
+  for (ASTPtrResult subSt; (subSt = parseBlockItem());) {
+    st->children.push_back(subSt);
+  }
+  if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {
+    return error("Expected closing curly after compund statement");
+  }
+  return st;
+}
+
+ASTPtrResult Parser::parseBlockItem() {
+  auto decl = parseDeclaration();
+  if (decl) {
+    return decl;
+  }
+  if (!decl.isNop()) {
+    return error("Expected declaration");
+  }
+  auto st = parseStatement();
+  if (st) {
+    return st;
+  }
+  if (!st.isNop()) {
+    return error("Expected statement");
+  }
+  return nop();
+}
+
+bool Parser::nextIsAbstractDeclarator() {
+  switch (lex->peekTokenKind()) {
+  case Token::PUNCT_STAR:
+  case Token::PUNCT_PARENO:
+  case Token::PUNCT_SQUAREO:
+    return true;
+  default:
+    return false;
+  }
+}
+

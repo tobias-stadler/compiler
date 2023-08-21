@@ -32,3 +32,17 @@ CountedPtr<BasicType> BasicType::create(Kind kind, Qualifier qualifier) {
   }
   return make_counted<BasicType>(kind, qualifier);
 }
+
+bool SymbolTable::Scope::declareSymbol(std::string name, Symbol symbol) {
+  auto [_, succ] = identifierTypes.insert(
+      std::make_pair(std::move(name), std::move(symbol)));
+  return succ;
+}
+
+Symbol *SymbolTable::Scope::getSymbol(std::string_view name) {
+  auto it = identifierTypes.find(name);
+  if (it == identifierTypes.end()) {
+    return nullptr;
+  }
+  return &it->second;
+}

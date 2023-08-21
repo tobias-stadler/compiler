@@ -163,19 +163,8 @@ class SymbolTable {
 public:
   class Scope {
   public:
-    bool declareSymbol(std::string name, Symbol symbol) {
-      auto [_, succ] = identifierTypes.insert(
-          std::make_pair(std::move(name), std::move(symbol)));
-      return succ;
-    }
-
-    Symbol *getSymbol(std::string_view name) {
-      auto it = identifierTypes.find(name);
-      if (it == identifierTypes.end()) {
-        return nullptr;
-      }
-      return &it->second;
-    }
+    bool declareSymbol(std::string name, Symbol symbol);
+    Symbol *getSymbol(std::string_view name);
 
   private:
     std::map<std::string, Symbol, std::less<>> identifierTypes;
