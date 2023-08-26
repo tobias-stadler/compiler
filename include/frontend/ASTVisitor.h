@@ -3,12 +3,9 @@
 #include "frontend/AST.h"
 
 #define VISIT_DELEGATE(AstTy)                                                  \
-  impl()->visit##AstTy(*static_cast<AstTy##AST *>(&ast));
+  impl().visit##AstTy(*static_cast<AstTy##AST *>(&ast));
 
 template <class D> class ASTVisitor {
-
-public:
-  void run(AST *ast) { dispatch(ast); }
 
 protected:
   void dispatch(AST *ast) {
@@ -23,7 +20,7 @@ protected:
     case AST::EMPTY:
       break;
     default:
-      impl()->visit(ast);
+      impl().visit(ast);
       break;
     case AST::ASSIGN:
     case AST::ASSIGN_ADD:
@@ -86,17 +83,16 @@ protected:
     }
   }
 
-  D *impl() { return static_cast<D *>(this); }
+  D &impl() { return static_cast<D &>(*this); }
 
   void visit(AST &ast) {}
-  void visitNum(NumAST &ast) { impl()->visit(ast); }
-  void visitVar(VarAST &ast) { impl()->visit(ast); }
-  void visitBinop(BinopAST &ast) { impl()->visit(ast); }
-  void visitCompoundSt(CompoundStAST &ast) { impl()->visit(ast); }
-  void visitIfSt(IfStAST &ast) { impl()->visit(ast); }
-  void visitWhileSt(WhileStAST &ast) { impl()->visit(ast); }
-  void visitDeclarator(DeclaratorAST &ast) { impl()->visit(ast); }
-  void visitDeclaration(DeclarationAST &ast) { impl()->visit(ast); }
-  void visitTranslationUnit(TranslationUnitAST &ast) { impl()->visit(ast); }
+  void visitNum(NumAST &ast) { impl().visit(ast); }
+  void visitVar(VarAST &ast) { impl().visit(ast); }
+  void visitBinop(BinopAST &ast) { impl().visit(ast); }
+  void visitCompoundSt(CompoundStAST &ast) { impl().visit(ast); }
+  void visitIfSt(IfStAST &ast) { impl().visit(ast); }
+  void visitWhileSt(WhileStAST &ast) { impl().visit(ast); }
+  void visitDeclarator(DeclaratorAST &ast) { impl().visit(ast); }
+  void visitDeclaration(DeclarationAST &ast) { impl().visit(ast); }
+  void visitTranslationUnit(TranslationUnitAST &ast) { impl().visit(ast); }
 };
-

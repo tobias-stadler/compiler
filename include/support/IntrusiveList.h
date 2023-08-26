@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
+#include <iterator>
 template <typename N, typename P> class IntrusiveList;
 
 template <typename N, typename P> class IntrusiveListNode {
@@ -29,18 +31,18 @@ public:
 
   bool isLinked() { return parent && next && prev; }
 
-  N *unlink() {
-    if (prev)
-      prev->next = next;
-    if (next)
-      next->prev = prev;
+  void unlink() {
+    if (!isLinked()) {
+      return;
+    }
+    prev->next = next;
+    next->prev = prev;
+    parent = nullptr;
     next = nullptr;
     prev = nullptr;
-    parent = nullptr;
-    return static_cast<N *>(this);
   }
 
-  void unlinkAndDelete() { delete unlink(); }
+  void deleteThis() { delete static_cast<N *>(this); }
 
   void insertNext(N *o) {
     assert(o && next && parent);
@@ -61,11 +63,7 @@ public:
   }
 
 protected:
-  ~IntrusiveListNode() {
-    if (isLinked()) {
-      unlink();
-    }
-  }
+  ~IntrusiveListNode() { unlink(); }
 
 private:
   IntrusiveList<N, P> *parent = nullptr;
@@ -88,11 +86,72 @@ public:
     sentryEnd.insertPrev(o);
   }
 
+  void deleteAll() {
+    for (auto *node = sentryBegin.next; node != &sentryEnd;) {
+      auto *tmp = node;
+      node = node->next;
+      tmp->parent = nullptr;
+      tmp->deleteThis();
+    }
+  }
+
   IntrusiveListNode<N, P> &getSentryBegin() { return sentryBegin; }
   IntrusiveListNode<N, P> &getSentryEnd() { return sentryEnd; }
 
+  class iterator {
+  public:
+    using iterator_category = std::bidirectional_iterator_tag;
+    using value_type = N;
+    using difference_type = std::ptrdiff_t;
+    using pointer = value_type *;
+    using reference = value_type &;
+
+    iterator(IntrusiveListNode<N, P> &ref) : mPtr(&ref) {}
+
+    reference operator*() const { return static_cast<reference>(*mPtr); }
+    pointer operator->() const { return static_cast<pointer>(mPtr); }
+
+    iterator &operator++() {
+      mPtr = &mPtr->getNext();
+      return *this;
+    }
+
+    iterator operator++(int) {
+      iterator tmp(*this);
+      ++(*this);
+      return tmp;
+    }
+
+    iterator &operator--() {
+      mPtr = &mPtr->getPrev();
+      return *this;
+    }
+
+    iterator operator--(int) {
+      iterator tmp(*this);
+      --(*this);
+      return tmp;
+    }
+
+    friend bool operator==(const iterator &a, const iterator &b) {
+      return a.mPtr == b.mPtr;
+    }
+
+    friend bool operator!=(const iterator &a, const iterator &b) {
+      return a.mPtr != b.mPtr;
+    }
+
+  private:
+    IntrusiveListNode<N, P> *mPtr;
+  };
+
+  iterator begin() { return iterator(*sentryBegin.next); }
+  iterator end() { return iterator(sentryEnd); }
+
 protected:
-  ~IntrusiveList() {}
+  IntrusiveList(const IntrusiveList &o) = delete;
+  IntrusiveList &operator=(const IntrusiveList &o) = delete;
+  ~IntrusiveList() { deleteAll(); }
 
 private:
   IntrusiveListNode<N, P> sentryBegin;

@@ -288,4 +288,3 @@ public:
 
   std::vector<Ptr> declarations;
 };
-

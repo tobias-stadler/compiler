@@ -29,7 +29,9 @@ void SSADef::addUse(SSAUse &use) {
   chNext = &use;
 }
 
-SSAUse::SSAUse(SSADef &def) { def.addUse(*this); }
+SSAUse::SSAUse(Instr &parent, SSADef &def) : parent(&parent) {
+  def.addUse(*this);
+}
 
 namespace {
 std::map<unsigned, IntSSAType> otherIntTypes;
@@ -40,4 +42,15 @@ IntSSAType &IntSSAType::get(unsigned bits) {
   auto [it, succ] =
       otherIntTypes.insert(std::make_pair(bits, IntSSAType(bits)));
   return it->second;
+}
+
+void SSADef::unlinkAllUses() {
+  for (SSAUse *use = chNext; use;) {
+    SSAUse &tmp = *use;
+    use = tmp.chNext;
+    tmp.def = nullptr;
+    tmp.chPrev = nullptr;
+    tmp.chNext = nullptr;
+  }
+  chNext = nullptr;
 }

@@ -8,6 +8,7 @@ inc_src = [
 'frontend/Parser.h',
 'frontend/Type.h',
 'frontend/IRGen.h',
-'ir/IR.h'
+'ir/IR.h',
+'ir/IRPrinter.h'
 ]
 install_headers(inc_src)

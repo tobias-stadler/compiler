@@ -325,4 +325,3 @@ bool Parser::nextIsAbstractDeclarator() {
     return false;
   }
 }
-
