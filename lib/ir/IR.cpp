@@ -5,32 +5,16 @@
 
 void SSAUse::unlink() {
   if (chPrev) {
-    chPrev->chNext = chNext;
+    chPrev->ssaUse().chNext = chNext;
   } else if (def) {
-    def->chNext = chNext;
+    def->ssaDef().chNext = chNext;
   }
   if (chNext) {
-    chNext->chPrev = chPrev;
+    chNext->ssaUse().chPrev = chPrev;
   }
   def = nullptr;
   chNext = nullptr;
   chPrev = nullptr;
-}
-
-void SSADef::addUse(SSAUse &use) {
-  use.chNext = chNext;
-  use.chPrev = nullptr;
-  use.def = this;
-
-  if (chNext) {
-    chNext->chPrev = &use;
-  }
-
-  chNext = &use;
-}
-
-SSAUse::SSAUse(Instr &parent, SSADef &def) : parent(&parent) {
-  def.addUse(*this);
 }
 
 namespace {
@@ -45,8 +29,8 @@ IntSSAType &IntSSAType::get(unsigned bits) {
 }
 
 void SSADef::unlinkAllUses() {
-  for (SSAUse *use = chNext; use;) {
-    SSAUse &tmp = *use;
+  for (Operand *use = chNext; use;) {
+    SSAUse &tmp = use->ssaUse();
     use = tmp.chNext;
     tmp.def = nullptr;
     tmp.chPrev = nullptr;

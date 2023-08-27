@@ -1,4 +1,3 @@
-#include "ir/IRPrinter.h"
 #include <cstdlib>
 #include <frontend/AST.h>
 #include <frontend/ASTPrinter.h>
@@ -7,6 +6,8 @@
 #include <fstream>
 #include <iostream>
 #include <ir/IR.h>
+#include <ir/IRPrinter.h>
+#include <ir/InstrBuilder.h>
 #include <string>
 
 int main(int argc, char *argv[]) {
@@ -37,13 +38,20 @@ int main(int argc, char *argv[]) {
   std::cout << "Parsing finished\n";
   PrintAST(ast->get());
 
-  Block b;
-  InstrEmitter e(b);
-  auto i1 = e.emitConstInt(IntSSAType::get(32), 1);
-  auto i2 = e.emitConstInt(IntSSAType::get(32), 2);
-  auto i3 = e.emitAdd(IntSSAType::get(32), i1->getDef(), i2->getDef());
-  PrintIR(b);
-  PrintIR(*i3);
+  Function func;
+  Block *b = new Block();
+  Block *b2 = new Block();
+  func.insertBegin(b);
+  func.insertEnd(b2);
+  InstrBuilder e2(*b2);
+  auto i4 = e2.emitConstInt(IntSSAType::get(32), 4);
+  InstrBuilder e1(*b);
+  auto i1 = e1.emitConstInt(IntSSAType::get(32), 1);
+  auto i2 = e1.emitConstInt(IntSSAType::get(32), 2);
+  auto i3 = e1.emitAdd(i1->getDef(), i2->getDef());
+  auto i5 = e1.emitCmp(BrCond::eq(), i3->getDef(), i4->getDef());
+  e1.emitBrCond(i5->getDef(), *b2, *b);
+  PrintIR(func);
 
   return EXIT_SUCCESS;
 }

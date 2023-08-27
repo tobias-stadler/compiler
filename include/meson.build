@@ -9,6 +9,7 @@ inc_src = [
 'frontend/Type.h',
 'frontend/IRGen.h',
 'ir/IR.h',
-'ir/IRPrinter.h'
+'ir/IRPrinter.h',
+'ir/InstrBuilder.h'
 ]
 install_headers(inc_src)

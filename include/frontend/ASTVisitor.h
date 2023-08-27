@@ -7,7 +7,7 @@
 
 template <class D> class ASTVisitor {
 
-protected:
+public:
   void dispatch(AST *ast) {
     if (!ast) {
       return;
@@ -83,9 +83,10 @@ protected:
     }
   }
 
+protected:
   D &impl() { return static_cast<D &>(*this); }
 
-  void visit(AST &ast) {}
+  void visit(AST &) {}
   void visitNum(NumAST &ast) { impl().visit(ast); }
   void visitVar(VarAST &ast) { impl().visit(ast); }
   void visitBinop(BinopAST &ast) { impl().visit(ast); }

@@ -63,6 +63,8 @@ public:
   }
 
 protected:
+  IntrusiveListNode(const IntrusiveListNode &o) = delete;
+  IntrusiveListNode &operator=(const IntrusiveListNode &o) = delete;
   ~IntrusiveListNode() { unlink(); }
 
 private:

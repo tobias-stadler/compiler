@@ -1,15 +1,60 @@
 #include "ir/IRPrinter.h"
 #include "ir/IR.h"
 #include "ir/IRVisitor.h"
+#include <cassert>
 #include <iostream>
 #include <map>
+#include <optional>
 
 namespace {
+class NumberingIRVisitor : public IRVisitor<NumberingIRVisitor> {
+public:
+  void visitFunction(Function &func) {
+    for (auto &block : func) {
+      defNum(block.getDef());
+    }
+    for (auto &block : func) {
+      dispatch(block);
+    }
+  }
+
+  void visitOperandSSADef(Operand &op) { defNum(op); }
+
+  unsigned defNum(Operand &op) {
+    auto [it, succ] = ssaDefs.insert(std::make_pair(&op, nextSSADefNum));
+    if (succ) {
+      return nextSSADefNum++;
+    } else {
+      return it->second;
+    }
+  }
+
+  std::optional<unsigned> getNum(Operand &op) {
+    auto it = ssaDefs.find(&op);
+    if (it != ssaDefs.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+private:
+  std::map<Operand *, unsigned> ssaDefs;
+  unsigned nextSSADefNum = 0;
+};
+
 class PrintIRVisitor : public IRVisitor<PrintIRVisitor> {
 public:
+  void visitFunction(Function &func) {
+    numbering.dispatch(func);
+    for (auto &b : func) {
+      std::cout << "%" << numbering.getNum(b.getDef()).value() << ":\n";
+      dispatch(b);
+    }
+  }
+
   void visitBlock(Block &block) {
     for (auto &i : block) {
-      visitInstr(i);
+      dispatch(i);
       std::cout << "\n";
     }
   }
@@ -18,40 +63,75 @@ public:
     std::cout << Instr::kindName(instr.getKind());
     for (auto &op : instr) {
       std::cout << " ";
-      switch (op.getKind()) {
-      case Operand::EMPTY:
-        continue;
-      case Operand::IMM32:
-        std::cout << op.imm32();
-        break;
-      case Operand::SSA_DEF_TYPE:
-      case Operand::SSA_DEF_REGCLASS:
-        std::cout << "def(%" << defSSA(op) << ")";
-        break;
-      case Operand::SSA_USE:
-        printSSAUse(op);
-        break;
-      default:
-        std::cout << "?";
-      }
+      dispatch(op);
     }
   }
 
-private:
-  std::map<SSADef *, unsigned> ssaDefs;
-  unsigned nextSSADefNum = 0;
-  unsigned defSSA(Operand &op) {
-    unsigned num = nextSSADefNum++;
-    ssaDefs.insert(std::make_pair(&op.ssaDef(), num));
-    return num;
+  void visitOperand(Operand &op) {
+    switch (op.getKind()) {
+    case Operand::EMPTY:
+      std::cout << "Empty";
+      break;
+    case Operand::IMM32:
+      std::cout << "imm32(" << op.imm32() << ")";
+      break;
+    case Operand::SSA_DEF_TYPE:
+      std::cout << "def(%" << numbering.defNum(op) << ",";
+      printSSAType(op.ssaDefType());
+      std::cout << ")";
+      break;
+    case Operand::SSA_DEF_REGCLASS:
+      std::cout << "def(%" << numbering.defNum(op) << ",";
+      std::cout << op.ssaDefRegClass() << ")";
+      break;
+    case Operand::SSA_USE:
+    case Operand::SSA_DEF_BLOCK:
+    case Operand::SSA_DEF_FUNCTION:
+    case Operand::DEF_REG:
+    case Operand::USE_REG:
+    case Operand::BLOCK:
+      assert(false);
+      break;
+    case Operand::BRCOND:
+      std::cout << BrCond::kindName(op.brCond().getKind());
+      break;
+    }
   }
-  void printSSAUse(Operand &op) {
-    if (auto it = ssaDefs.find(&op.ssaUse().getDef()); it != ssaDefs.end()) {
-      std::cout << "%" << it->second;
+
+  void visitOperandSSAUse(Operand &op) {
+    Operand &def = op.ssaUse().getDef();
+    if (auto n = numbering.getNum(def)) {
+      std::cout << "%" << *n;
     } else {
       std::cout << "(";
-      visitInstr(op.ssaUse().getDef().getParent());
+      switch (def.getKind()) {
+      case Operand::EMPTY:
+        std::cout << "Empty";
+        break;
+      case Operand::SSA_DEF_TYPE:
+      case Operand::SSA_DEF_REGCLASS:
+        std::cout << "unnamed def";
+        // visitInstr(op.ssaUse().getDef().getParent());
+        break;
+      case Operand::SSA_DEF_BLOCK:
+        std::cout << "unnamed block";
+        break;
+      case Operand::SSA_DEF_FUNCTION:
+        std::cout << "unnamed function";
+        break;
+      default:
+        assert(false);
+        break;
+      }
       std::cout << ")";
+    }
+  }
+
+  NumberingIRVisitor numbering;
+  void printSSAType(SSAType &type) {
+    std::cout << SSAType::kindName(type.getKind());
+    if (type.getKind() == SSAType::INT) {
+      std::cout << static_cast<IntSSAType &>(type).getBits();
     }
   }
 };
