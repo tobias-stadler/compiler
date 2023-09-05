@@ -4,6 +4,7 @@ core_src = [
 'frontend/Type.cpp',
 'frontend/IRGen.cpp',
 'frontend/ASTPrinter.cpp',
+'frontend/Semantics.cpp',
 'ir/IR.cpp',
 'ir/IRPrinter.cpp',
 ]

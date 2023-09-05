@@ -7,6 +7,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -103,24 +104,43 @@ public:
 class FuncType : public DerivedType {
 public:
   FuncType() : DerivedType(FUNC, nullptr, Qualifier()) {}
-  Type &getParamType(size_t i) { return *paramTypes[i]; }
+  CountedPtr<Type> &getParamType(size_t i) { return paramTypes[i]; }
   size_t getNumParams() { return paramTypes.size(); };
   void addParam(CountedPtr<Type> type) {
     paramTypes.push_back(std::move(type));
   }
 
+  bool addNamedParam(std::string_view name, CountedPtr<Type> type) {
+    auto [_, succ] = paramIndex.emplace(name, paramTypes.size());
+    if (!succ) {
+      return false;
+    }
+    addParam(std::move(type));
+    return true;
+  }
+
+  Type *getNamedParamType(std::string_view name) {
+    auto it = paramIndex.find(name);
+    if (it == paramIndex.end()) {
+      return nullptr;
+    }
+    return paramTypes[it->second].get();
+  }
+
   auto &getParamTypes() { return paramTypes; }
+  auto &getParamIndex() { return paramIndex; }
 
 private:
   std::vector<CountedPtr<Type>> paramTypes;
+  std::unordered_map<std::string_view, size_t> paramIndex;
 };
 
 class StructType : public Type {
 public:
   StructType() : Type(STRUCT, Qualifier()) {}
 
-  Type *getNamedMemberType(std::string_view v) {
-    auto it = memberIndex.find(v);
+  Type *getNamedMemberType(std::string_view name) {
+    auto it = memberIndex.find(name);
     if (it == memberIndex.end()) {
       return nullptr;
     }
@@ -129,9 +149,8 @@ public:
 
   void addMember(Type *type) { members.push_back(type); }
 
-  bool addNamedMember(std::string name, Type *type) {
-    auto [_, succ] =
-        memberIndex.insert(std::make_pair(std::move(name), memberIndex.size()));
+  bool addNamedMember(std::string_view name, Type *type) {
+    auto [_, succ] = memberIndex.emplace(name, members.size());
     if (!succ) {
       return false;
     }
@@ -141,41 +160,5 @@ public:
 
 private:
   std::vector<CountedPtr<Type>> members;
-  std::map<std::string, size_t, std::less<>> memberIndex;
-};
-
-class Symbol {
-public:
-  enum Kind { EMPTY, TYPE, EXTERN, STATIC, AUTO, REGISTER };
-  Symbol(Kind kind, CountedPtr<Type> type)
-      : kind(kind), type(std::move(type)) {}
-
-  Kind getKind() { return kind; }
-
-  Type &getType() { return *type; }
-
-private:
-  Kind kind;
-  CountedPtr<Type> type;
-};
-
-class SymbolTable {
-public:
-  class Scope {
-  public:
-    bool declareSymbol(std::string name, Symbol symbol);
-    Symbol *getSymbol(std::string_view name);
-
-  private:
-    std::map<std::string, Symbol, std::less<>> identifierTypes;
-  };
-
-  Scope &scope() { return scopes.back(); }
-
-  void pushScope() { scopes.emplace_back(); }
-
-  void popScope() { scopes.pop_back(); }
-
-private:
-  std::vector<Scope> scopes;
+  std::unordered_map<std::string_view, size_t> memberIndex;
 };

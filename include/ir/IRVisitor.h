@@ -3,6 +3,11 @@
 
 template <class D> class IRVisitor {
 public:
+  void dispatch(Program *prog) {
+    if (prog) {
+      dispatch(*prog);
+    }
+  }
   void dispatch(Function *func) {
     if (func) {
       dispatch(*func);
@@ -18,6 +23,7 @@ public:
       dispatch(*instr);
     }
   }
+  void dispatch(Program &prog) { impl().visitProgram(prog); }
   void dispatch(Function &func) { impl().visitFunction(func); }
   void dispatch(Block &block) { impl().visitBlock(block); }
   void dispatch(Instr &instr) {
@@ -54,6 +60,13 @@ public:
 
 protected:
   D &impl() { return static_cast<D &>(*this); }
+
+  void visitProgram(Program &prog) {
+    for (auto &f : prog.functions) {
+      dispatch(*f);
+    }
+  }
+
   void visitFunction(Function &func) {
     for (auto &b : func) {
       dispatch(b);

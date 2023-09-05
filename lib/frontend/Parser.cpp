@@ -165,18 +165,20 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
       return decl;
     } else {
       auto func = make_counted<FuncType>();
-      do {
-        auto spec = parseDeclSpec<true, true, false>();
-        if (!spec) {
-          return error("Expected decl specifiers");
-        }
-        auto decl = parseDeclarator(false);
-        if (!decl) {
-          return error("Expected declarator");
-        }
-        decl->spliceEnd(DeclaratorAST(spec->createType(), nullptr));
-        func->addParam(std::move(decl->type));
-      } while (lex->matchNextToken(Token::PUNCT_COMMA));
+      if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
+        do {
+          auto spec = parseDeclSpec<true, true, false>();
+          if (!spec) {
+            return error("Expected decl specifiers");
+          }
+          auto decl = parseDeclarator(false);
+          if (!decl) {
+            return error("Expected declarator");
+          }
+          decl->spliceEnd(DeclaratorAST(spec->createType(), nullptr));
+          func->addNamedParam(decl->ident, std::move(decl->type));
+        } while (lex->matchNextToken(Token::PUNCT_COMMA));
+      }
       if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
         return error("Expected closing paren");
       }
@@ -219,15 +221,19 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
   switch (lex->peekTokenKind()) {
   case Token::PUNCT_STAR: {
     lex->dropToken();
+    auto quali = Type::Qualifier();
     auto spec = parseDeclSpec<false, true, false>();
-    if (!spec) {
+    if (spec) {
+      quali = spec->qualifier;
+    } else if (!spec.isNop()) {
       return error("Expected qualifier after ptr-decl");
     }
+
     auto decl = parseDeclarator(abstract);
     if (!decl) {
       return error("Expected decl after ptr-decl");
     }
-    decl->spliceEnd(DeclaratorAST(make_counted<PtrType>(spec->qualifier)));
+    decl->spliceEnd(DeclaratorAST(make_counted<PtrType>(quali)));
     return decl;
   }
   default:
@@ -235,7 +241,7 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
   }
 }
 
-ASTPtrResult Parser::parseDeclaration() {
+ASTPtrResult Parser::parseDeclaration(bool external) {
   auto spec = parseDeclSpec();
   if (spec.isNop()) {
     return nop();
@@ -244,24 +250,36 @@ ASTPtrResult Parser::parseDeclaration() {
     return error("Expected declaration specifiers");
   }
 
-  auto res = std::make_unique<DeclarationAST>();
   CountedPtr<Type> type = spec->createType();
-  do {
+  auto decl = parseDeclarator(false);
+  if (!decl) {
+    return error("Expected valid declarator");
+  }
+  decl->spliceEnd(DeclaratorAST(type, nullptr));
+  if (nextIsDeclarationList()) {
+    if (!external) {
+      return error("Function definition not allowed here");
+    }
+    if (decl->type->getKind() != Type::FUNC) {
+      return error("Function declarator must declare function");
+    }
+    auto st = parseCompoundStatement();
+    if (!st) {
+      return error("Expected compound statement in function definition");
+    }
+    return new FunctionDefinitionAST(spec.moveRes(), decl.moveRes(),
+                                     st.moveRes());
+  }
+  auto res = std::make_unique<DeclarationAST>();
+  res->declarators.push_back(decl.moveRes());
+  while (lex->matchNextToken(Token::PUNCT_COMMA)) {
     auto decl = parseDeclarator(false);
     if (!decl) {
       return error("Expected valid declarator");
     }
     decl->spliceEnd(DeclaratorAST(type, nullptr));
     res->declarators.push_back(std::move(*decl));
-    if (lex->peekTokenKind() == Token::PUNCT_CURLYO) {
-      auto st = parseCompoundStatement();
-      if (!st) {
-        return error("Expected compound statement in function definition");
-      }
-      res->st = st;
-      return res;
-    }
-  } while (lex->matchNextToken(Token::PUNCT_COMMA));
+  }
   if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
     return error("Expected semicolon after declaration");
   }
@@ -271,13 +289,13 @@ ASTPtrResult Parser::parseDeclaration() {
 ASTPtrResult Parser::parseTranslationUnit() {
   auto tu = std::make_unique<TranslationUnitAST>();
   while (true) {
-    auto decl = parseDeclaration();
+    auto decl = parseDeclaration(true);
     if (decl) {
       tu->declarations.push_back(decl);
     } else if (decl.isNop()) {
       return tu;
     } else {
-      return error("Expected declaration");
+      return error("Expected external declaration");
     }
   }
 }

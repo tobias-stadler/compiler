@@ -171,13 +171,24 @@ public:
 
   bool nextIsAbstractDeclarator();
 
+  bool nextIsDeclarationList() {
+    switch (lex->peekTokenKind()) {
+    case Token::PUNCT_EQ:
+    case Token::PUNCT_COMMA:
+    case Token::PUNCT_SEMICOLON:
+      return false;
+    default:
+      return true;
+    }
+  }
+
   ASTPtrResult parseStatement();
 
   ASTPtrResult parseExpression(int prec = 1);
 
   ASTPtrResult parsePrimary();
 
-  ASTPtrResult parseDeclaration();
+  ASTPtrResult parseDeclaration(bool external = false);
 
   ASTResult<DeclaratorAST> parseDeclarator(bool abstract);
   ASTResult<DeclaratorAST> parseDirectDeclarator(bool abstract);
@@ -264,7 +275,7 @@ public:
     }
     if constexpr (enableStorage) {
       if (totalStorage == 0) {
-        storageKind = Symbol::AUTO;
+        storageKind = Symbol::EMPTY;
       } else if (totalStorage == 1) {
         if (keys[Token::KEYWORD_AUTO] == 1) {
           storageKind = Symbol::AUTO;

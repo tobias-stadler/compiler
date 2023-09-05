@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <frontend/AST.h>
 #include <frontend/ASTPrinter.h>
+#include <frontend/IRGen.h>
 #include <frontend/Lexer.h>
 #include <frontend/Parser.h>
 #include <fstream>
@@ -36,22 +37,29 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
   std::cout << "Parsing finished\n";
-  PrintAST(ast->get());
+  PrintAST(**ast);
 
+  auto prog = IRGenAST(**ast);
+  PrintIR(*prog);
+
+  auto& t = VoidSSAType::get();
+
+  /*
   Function func;
   Block *b = new Block();
   Block *b2 = new Block();
   func.insertBegin(b);
   func.insertEnd(b2);
   InstrBuilder e2(*b2);
-  auto i4 = e2.emitConstInt(IntSSAType::get(32), 4);
+  auto &i4 = e2.emitConstInt(IntSSAType::get(32), 4);
   InstrBuilder e1(*b);
-  auto i1 = e1.emitConstInt(IntSSAType::get(32), 1);
-  auto i2 = e1.emitConstInt(IntSSAType::get(32), 2);
-  auto i3 = e1.emitAdd(i1->getDef(), i2->getDef());
-  auto i5 = e1.emitCmp(BrCond::eq(), i3->getDef(), i4->getDef());
-  e1.emitBrCond(i5->getDef(), *b2, *b);
+  auto &i1 = e1.emitConstInt(IntSSAType::get(32), 1);
+  auto &i2 = e1.emitConstInt(IntSSAType::get(32), 2);
+  auto &i3 = e1.emitAdd(i1.getDef(), i2.getDef());
+  auto &i5 = e1.emitCmp(BrCond::eq(), i3.getDef(), i4.getDef());
+  e1.emitBrCond(i5.getDef(), *b2, *b);
   PrintIR(func);
+  */
 
   return EXIT_SUCCESS;
 }
@@ -73,7 +81,7 @@ void interactive() {
       continue;
     }
     std::cout << "Parsing finished\n";
-    PrintAST(ast->get());
+    PrintAST(*ast.res());
   }
   return;
 }

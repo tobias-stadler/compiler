@@ -2,4 +2,4 @@
 
 #include "AST.h"
 
-void PrintAST(AST *ast);
+void PrintAST(AST &ast);

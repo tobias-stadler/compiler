@@ -1,19 +1,15 @@
 #include "frontend/ASTPrinter.h"
 
 #include "frontend/ASTVisitor.h"
+#include "frontend/Type.h"
 
 namespace {
 
 class PrintASTVisitor : public ASTVisitor<PrintASTVisitor> {
 public:
-  void run(AST *ast) {
-    dispatch(ast);
-    std::cout << "\n";
-  }
-
   void visit(AST &ast) { std::cout << AST::kindName(ast.getKind()); }
 
-  void visitVar(VarAST &ast) { std::cout << "Var(" << ast.varName << ")"; }
+  void visitVar(VarAST &ast) { std::cout << "Var(" << ast.ident << ")"; }
 
   void visitNum(NumAST &ast) { std::cout << "Num(" << ast.num << ")"; }
 
@@ -74,9 +70,15 @@ public:
       first = false;
       dispatch(d);
     }
-    if (ast.st) {
-      dispatch(ast.st.get());
+  }
+
+  void visitFunctionDefinition(FunctionDefinitionAST &ast) {
+    dispatch(ast.decl);
+    for (auto [name, idx] :
+         static_cast<FuncType *>(ast.decl.type.get())->getParamIndex()) {
+      std::cout << "\n" << name << ": " << idx;
     }
+    dispatch(ast.st.get());
   }
 
   void visitTranslationUnit(TranslationUnitAST &ast) {
@@ -120,4 +122,7 @@ public:
 };
 } // namespace
 
-void PrintAST(AST *ast) { PrintASTVisitor().run(ast); }
+void PrintAST(AST &ast) {
+  PrintASTVisitor().dispatch(ast);
+  std::cout << "\n";
+}

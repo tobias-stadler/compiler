@@ -1,4 +1,5 @@
 #pragma once
+#include "frontend/Semantics.h"
 #include "frontend/Type.h"
 #include "support/RefCount.h"
 #include <cassert>
@@ -59,6 +60,7 @@ public:
     ST_WHILE,
     DECLARATOR,
     DECLARATION,
+    FUNCTION_DEFINITION,
     TRANSLATION_UNIT,
   };
 
@@ -102,7 +104,7 @@ public:
 class UnopAST : public ExpressionAST {
 public:
   std::unique_ptr<AST> child;
-  UnopAST(Kind kind, std::unique_ptr<AST> child)
+  UnopAST(Kind kind, Ptr child)
       : ExpressionAST(kind), child(std::move(child)) {}
 
   AST &getSubExpression() { return *child; }
@@ -129,8 +131,8 @@ public:
 
 class VarAST : public AST {
 public:
-  std::string_view varName;
-  VarAST(std::string_view varName) : AST(VAR), varName(varName) {}
+  std::string_view ident;
+  VarAST(std::string_view varName) : AST(VAR), ident(varName) {}
 };
 
 class CompoundStAST : public AST {
@@ -181,67 +183,6 @@ public:
   }
 };
 
-class ASTError {
-public:
-  enum Kind {
-    EMPTY,
-    NOP,
-    EXPECTED_TOKEN,
-  };
-  ASTError(Kind kind) : kind(kind) {}
-  Kind getKind() { return kind; }
-  bool isEmpty() { return kind == EMPTY; };
-  bool isNop() { return kind == NOP; };
-
-private:
-  Kind kind;
-};
-
-template <typename T> class ASTResult {
-public:
-  ASTResult(T &&res) : mRes(std::forward<T>(res)), mErr(ASTError::EMPTY) {}
-  ASTResult(ASTError err) : mErr(err) {}
-
-  explicit operator bool() { return mErr.isEmpty(); }
-
-  ASTError &err() {
-    assert(!mErr.isEmpty() && "Invalid ASTError accessed");
-    return mErr;
-  }
-
-  T &res() {
-    assert(mErr.isEmpty() && "Invalid ASTResult accessed");
-    return mRes;
-  }
-
-  bool isNop() { return mErr.isNop(); }
-
-  T &operator*() { return res(); }
-  T *operator->() { return &res(); }
-
-protected:
-  T mRes;
-  ASTError mErr;
-};
-
-class ASTPtrResult : public ASTResult<std::unique_ptr<AST>> {
-public:
-  ASTPtrResult() : ASTResult(ASTError::NOP) {}
-  ASTPtrResult(std::nullptr_t) : ASTResult(ASTError::NOP) {}
-  ASTPtrResult(AST *ast) : ASTResult(std::unique_ptr<AST>(ast)) {
-    assert(ast && "Use NOP instead of nullptr");
-  }
-  ASTPtrResult(ASTError err) : ASTResult(err) {}
-
-  operator AST::Ptr &&() {
-    assert(mErr.isEmpty() && "Invalid ASTResult accessed");
-    return std::move(mRes);
-  }
-
-  template <class U>
-  ASTPtrResult(std::unique_ptr<U> &&ast) : ASTResult(std::move(ast)) {}
-};
-
 class DeclaratorAST : public AST {
 public:
   DeclaratorAST() : AST(DECLARATOR) {}
@@ -278,8 +219,23 @@ class DeclarationAST : public AST {
 public:
   DeclarationAST() : AST(DECLARATION) {}
 
+  DeclSpec spec;
   std::vector<DeclaratorAST> declarators;
-  Ptr st = nullptr;
+};
+
+class FunctionDefinitionAST : public AST {
+public:
+  FunctionDefinitionAST(DeclSpec spec, DeclaratorAST decl, Ptr st)
+      : AST(FUNCTION_DEFINITION), spec(std::move(spec)), decl(std::move(decl)),
+        st(std::move(st)) {}
+  DeclSpec spec;
+  DeclaratorAST decl;
+  Ptr st;
+
+  CompoundStAST &getStatement() {
+    return *static_cast<CompoundStAST *>(st.get());
+  }
+  FuncType &getType() { return *static_cast<FuncType *>(decl.type.get()); }
 };
 
 class TranslationUnitAST : public AST {
@@ -287,4 +243,67 @@ public:
   TranslationUnitAST() : AST(TRANSLATION_UNIT) {}
 
   std::vector<Ptr> declarations;
+};
+
+class ASTError {
+public:
+  enum Kind {
+    EMPTY,
+    NOP,
+    EXPECTED_TOKEN,
+  };
+  ASTError(Kind kind) : kind(kind) {}
+  Kind getKind() { return kind; }
+  bool isEmpty() { return kind == EMPTY; };
+  bool isNop() { return kind == NOP; };
+
+private:
+  Kind kind;
+};
+
+template <typename T> class ASTResult {
+public:
+  ASTResult(T &&res) : mRes(std::forward<T>(res)), mErr(ASTError::EMPTY) {}
+  ASTResult(ASTError err) : mErr(err) {}
+
+  explicit operator bool() { return mErr.isEmpty(); }
+
+  ASTError &err() {
+    assert(!mErr.isEmpty() && "Invalid ASTError accessed");
+    return mErr;
+  }
+
+  T &res() {
+    assert(mErr.isEmpty() && "Invalid ASTResult accessed");
+    return mRes;
+  }
+
+  T &&moveRes() { return std::move(res()); }
+
+  bool isNop() { return mErr.isNop(); }
+
+  T &operator*() { return res(); }
+  T *operator->() { return &res(); }
+
+protected:
+  T mRes;
+  ASTError mErr;
+};
+
+class ASTPtrResult : public ASTResult<std::unique_ptr<AST>> {
+public:
+  ASTPtrResult() : ASTResult(ASTError::NOP) {}
+  ASTPtrResult(std::nullptr_t) : ASTResult(ASTError::NOP) {}
+  ASTPtrResult(AST *ast) : ASTResult(std::unique_ptr<AST>(ast)) {
+    assert(ast && "Use NOP instead of nullptr");
+  }
+  ASTPtrResult(ASTError err) : ASTResult(err) {}
+
+  operator AST::Ptr &&() {
+    assert(mErr.isEmpty() && "Invalid ASTResult accessed");
+    return std::move(mRes);
+  }
+
+  template <class U>
+  ASTPtrResult(std::unique_ptr<U> &&ast) : ASTResult(std::move(ast)) {}
 };

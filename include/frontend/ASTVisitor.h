@@ -78,8 +78,12 @@ public:
     case AST::DECLARATION:
       VISIT_DELEGATE(Declaration);
       break;
+    case AST::FUNCTION_DEFINITION:
+      VISIT_DELEGATE(FunctionDefinition);
+      break;
     case AST::TRANSLATION_UNIT:
       VISIT_DELEGATE(TranslationUnit);
+      break;
     }
   }
 
@@ -87,13 +91,15 @@ protected:
   D &impl() { return static_cast<D &>(*this); }
 
   void visit(AST &) {}
-  void visitNum(NumAST &ast) { impl().visit(ast); }
-  void visitVar(VarAST &ast) { impl().visit(ast); }
-  void visitBinop(BinopAST &ast) { impl().visit(ast); }
-  void visitCompoundSt(CompoundStAST &ast) { impl().visit(ast); }
-  void visitIfSt(IfStAST &ast) { impl().visit(ast); }
-  void visitWhileSt(WhileStAST &ast) { impl().visit(ast); }
-  void visitDeclarator(DeclaratorAST &ast) { impl().visit(ast); }
-  void visitDeclaration(DeclarationAST &ast) { impl().visit(ast); }
-  void visitTranslationUnit(TranslationUnitAST &ast) { impl().visit(ast); }
+  void visitNum(NumAST &) {}
+  void visitVar(VarAST &) {}
+  void visitBinop(BinopAST &) {}
+  void visitUnop(UnopAST &) {}
+  void visitCompoundSt(CompoundStAST &) {}
+  void visitIfSt(IfStAST &) {}
+  void visitWhileSt(WhileStAST &) {}
+  void visitDeclarator(DeclaratorAST &) {}
+  void visitDeclaration(DeclarationAST &) {}
+  void visitFunctionDefinition(FunctionDefinitionAST &) {}
+  void visitTranslationUnit(TranslationUnitAST &) {}
 };

@@ -21,6 +21,9 @@ namespace {
 std::map<unsigned, IntSSAType> otherIntTypes;
 } // namespace
 
+VoidSSAType VoidSSAType::instance;
+PtrSSAType PtrSSAType::instance;
+
 IntSSAType &IntSSAType::get(unsigned bits) {
   assert(bits > 0);
   auto [it, succ] =
@@ -37,4 +40,33 @@ void SSADef::unlinkAllUses() {
     tmp.chNext = nullptr;
   }
   chNext = nullptr;
+}
+
+bool SSADef::hasExactlyNUses(unsigned n) {
+  unsigned count = 0;
+  for (Operand *use = chNext; use && count <= n; use = use->ssaUse().chNext) {
+    ++count;
+  }
+  return count == n;
+}
+
+Block &Operand::getParentBlock() { return getParent().getParent(); }
+
+unsigned SSADef::getNumUses() {
+  unsigned count = 0;
+  for (Operand *use = chNext; use; use = use->ssaUse().chNext) {
+    ++count;
+  }
+  return count;
+}
+
+void OperandChain::allocate(unsigned cap) {
+  assert(!operands);
+  operands = new Operand[cap];
+  capacity = cap;
+}
+
+void OperandChain::deallocate() {
+  delete[] operands;
+  capacity = 0;
 }

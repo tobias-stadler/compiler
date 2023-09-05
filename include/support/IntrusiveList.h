@@ -26,7 +26,7 @@ public:
 
   P &getParent() {
     assert(isLinked());
-    return static_cast<P *>(parent);
+    return *static_cast<P *>(parent);
   }
 
   bool isLinked() { return parent && next && prev; }
@@ -45,7 +45,7 @@ public:
   void deleteThis() { delete static_cast<N *>(this); }
 
   void insertNext(N *o) {
-    assert(o && next && parent);
+    assert(o && !o->isLinked() && next && parent);
     o->parent = parent;
     o->next = next;
     o->prev = this;

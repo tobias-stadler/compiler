@@ -3,9 +3,14 @@
 #include "support/IntrusiveList.h"
 #include <cassert>
 #include <cstdint>
+#include <iterator>
+#include <memory>
 #include <new>
 #include <type_traits>
 #include <utility>
+#include <vector>
+
+using SSASymbolId = unsigned;
 
 class SSAType {
 public:
@@ -44,6 +49,15 @@ private:
   Kind kind;
 };
 
+class VoidSSAType : public SSAType {
+public:
+  static VoidSSAType &get() { return instance; }
+
+private:
+  VoidSSAType() : SSAType(VOID) {}
+  static VoidSSAType instance;
+};
+
 class IntSSAType : public SSAType {
 public:
   static IntSSAType &get(unsigned bits);
@@ -68,6 +82,7 @@ class Instr;
 class Block;
 class Function;
 class Operand;
+class Program;
 
 class BrCond {
 public:
@@ -180,6 +195,46 @@ public:
 
   void unlinkAllUses();
 
+  class iterator {
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = Operand;
+    using difference_type = std::ptrdiff_t;
+    using pointer = value_type *;
+    using reference = value_type &;
+
+    iterator(Operand *ref) : mPtr(ref) {}
+
+    reference operator*() const { return *mPtr; }
+    pointer operator->() const { return mPtr; }
+
+    iterator &operator++();
+
+    iterator operator++(int) {
+      iterator tmp(*this);
+      ++(*this);
+      return tmp;
+    }
+
+    friend bool operator==(const iterator &a, const iterator &b) {
+      return a.mPtr == b.mPtr;
+    }
+
+    friend bool operator!=(const iterator &a, const iterator &b) {
+      return a.mPtr != b.mPtr;
+    }
+
+  private:
+    Operand *mPtr;
+  };
+
+  iterator begin() { return chNext; }
+  iterator end() { return nullptr; }
+
+  bool hasExactlyNUses(unsigned n);
+  bool hasUses() { return chNext; }
+  unsigned getNumUses();
+
 private:
   Operand *chNext = nullptr;
   union {
@@ -188,6 +243,21 @@ private:
     Block *contentBlock;
     Function *contentFunction;
   };
+};
+
+class OperandChain {
+public:
+  OperandChain() {}
+  OperandChain(const OperandChain &o) = delete;
+  OperandChain &operator=(const OperandChain &o) = delete;
+  ~OperandChain() { deallocate(); }
+
+  void allocate(unsigned cap);
+  void deallocate();
+
+private:
+  unsigned capacity = 0;
+  Operand *operands = nullptr;
 };
 
 class Operand {
@@ -255,7 +325,7 @@ public:
       contentUse.~SSAUse();
       break;
     case CHAIN:
-      delete[] contentChNext;
+      contentChain.~OperandChain();
       break;
     }
     kind = EMPTY;
@@ -274,9 +344,10 @@ public:
     } else if constexpr (K == BRCOND) {
       new (&contentBrCond) BrCond(std::forward<ARGS>(args)...);
     } else if constexpr (K == BLOCK) {
-      new (&contentChNext) Block *(std::forward<ARGS>(args)...);
+      new (&contentBlock) Block *(std::forward<ARGS>(args)...);
+    } else if constexpr (K == EMPTY) {
     } else if constexpr (K == CHAIN) {
-      new (&contentChNext) Operand *(std::forward<ARGS>(args)...);
+      new (&contentChain) OperandChain(std::forward<ARGS>(args)...);
     } else {
       static_assert(false, "Operand kind cannot be emplaced with these args");
     }
@@ -298,6 +369,10 @@ public:
     assert(kind == SSA_DEF_TYPE);
     return *ssaDef().contentType;
   }
+  void ssaDefSetType(SSAType &type) {
+    assert(kind == SSA_DEF_TYPE);
+    ssaDef().contentType = &type;
+  }
   unsigned ssaDefRegClass() {
     assert(kind == SSA_DEF_REGCLASS);
     return ssaDef().contentRegClass;
@@ -311,7 +386,7 @@ public:
     return *ssaDef().contentFunction;
   }
 
-  Block &useBlock() {
+  Block &block() {
     assert(kind == BLOCK && contentBlock);
     return *contentBlock;
   }
@@ -321,9 +396,9 @@ public:
     return contentBrCond;
   }
 
-  Operand *chain() {
+  OperandChain &chain() {
     assert(kind == CHAIN);
-    return contentChNext;
+    return contentChain;
   }
 
   void ssaDefAddUse(Operand &useOp) {
@@ -355,18 +430,32 @@ public:
     return *parent;
   }
 
+  Block &getParentBlock();
+
 private:
   Kind kind = EMPTY;
   Instr *parent = nullptr;
   union {
     SSADef contentDef;
     SSAUse contentUse;
+    OperandChain contentChain;
     unsigned contentReg;
     int32_t contentImm32;
-    Operand *contentChNext;
     Block *contentBlock;
     BrCond contentBrCond;
   };
+};
+
+class Program {
+public:
+  Program() {}
+
+  void addFunction(std::unique_ptr<Function> func) {
+    functions.push_back(std::move(func));
+  }
+
+public:
+  std::vector<std::unique_ptr<Function>> functions;
 };
 
 class Function : public IntrusiveList<Block, Function> {
@@ -509,18 +598,11 @@ public:
     return operands[n];
   }
 
-  Operand &getOperand(unsigned n) {
-    assert(n < getNumOperands());
-    return operands[n];
-  }
-
   void deleteOperands() {
     if (!operands)
       return;
     delete[] operands;
     operands = nullptr;
-    numDefs = 0;
-    numOther = 0;
     capacity = 0;
   }
 
@@ -531,17 +613,27 @@ public:
     capacity = cap;
   }
 
-  bool isVariadic() {
-    assert(operands);
-    return operands[capacity - 1].getKind() == Operand::CHAIN;
-  }
-
   void allocateVariadicOperands(unsigned cap) {
     assert(cap > 0);
     deleteOperands();
     capacity = cap + 1;
     operands = new Operand[capacity];
-    operands[cap].emplace<Operand::CHAIN>(nullptr, nullptr);
+    operands[cap].emplace<Operand::CHAIN>(this);
+  }
+
+  bool isVariadic() {
+    assert(operands);
+    return operands[capacity - 1].getKind() == Operand::CHAIN;
+  }
+
+  Operand &getOperand(unsigned n) {
+    assert(n < getNumOperands());
+    return operands[n];
+  }
+
+  Operand &getOperandUnchecked(unsigned n) {
+    assert(n < capacity);
+    return operands[n];
   }
 
   template <Operand::Kind K, typename... ARGS>
@@ -564,30 +656,8 @@ private:
   Operand *operands = nullptr;
 };
 
-class InstrPtr {
-public:
-  InstrPtr(Instr *instr) : instr(instr) { assert(instr); }
-
-  Instr &operator*() { return *instr; }
-  Instr *operator->() { return instr; }
-
-protected:
-  Instr *instr;
-};
-
-class PhiInstrPtr : public InstrPtr {
-public:
-  PhiInstrPtr(Instr *instr) : InstrPtr(instr) {
-    assert(instr->getKind() == Instr::INSTR_PHI);
-  }
-
-  void setup(SSAType &type, unsigned numPred) {
-    instr->allocateOperands(1 + 2 * numPred);
-    instr->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-  }
-
-  void addPred(Operand &def, Block &pred) {
-    instr->emplaceOperand<Operand::SSA_USE>(def);
-    instr->emplaceOperand<Operand::BLOCK>(&pred);
-  }
-};
+inline SSADef::iterator &SSADef::iterator::operator++() {
+  assert(mPtr);
+  mPtr = mPtr->ssaUse().chNext;
+  return *this;
+}

@@ -10,6 +10,8 @@ namespace {
 class NumberingIRVisitor : public IRVisitor<NumberingIRVisitor> {
 public:
   void visitFunction(Function &func) {
+    ssaDefs.clear();
+    nextSSADefNum = 0;
     for (auto &block : func) {
       defNum(block.getDef());
     }
@@ -44,6 +46,14 @@ private:
 
 class PrintIRVisitor : public IRVisitor<PrintIRVisitor> {
 public:
+  void visitProgram(Program &prog) {
+    for (auto &f : prog.functions) {
+      std::cout << "---\n";
+      dispatch(*f);
+      std::cout << "---\n";
+    }
+  }
+
   void visitFunction(Function &func) {
     numbering.dispatch(func);
     for (auto &b : func) {
@@ -127,13 +137,14 @@ public:
     }
   }
 
-  NumberingIRVisitor numbering;
   void printSSAType(SSAType &type) {
     std::cout << SSAType::kindName(type.getKind());
     if (type.getKind() == SSAType::INT) {
       std::cout << static_cast<IntSSAType &>(type).getBits();
     }
   }
+
+  NumberingIRVisitor numbering;
 };
 
 } // namespace
@@ -143,3 +154,4 @@ template <class T> void PrintIR(T &ir) { PrintIRVisitor().dispatch(ir); }
 template void PrintIR<Instr>(Instr &);
 template void PrintIR<Block>(Block &);
 template void PrintIR<Function>(Function &);
+template void PrintIR<Program>(Program &);
