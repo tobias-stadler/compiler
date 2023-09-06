@@ -73,11 +73,12 @@ private:
 };
 
 class DerivedType : public Type {
-public:
+protected:
   DerivedType(Kind kind, CountedPtr<Type> baseType, Qualifier qualifier)
       : Type(kind, qualifier), baseType(baseType) {}
 
-  Type &getBaseType() { return *baseType; }
+public:
+  CountedPtr<Type> &getBaseType() { return baseType; }
 
   void setBaseType(CountedPtr<Type> newBase) { baseType = std::move(newBase); }
 
@@ -88,12 +89,15 @@ private:
 class BasicType : public Type {
 public:
   BasicType(Kind kind = VOID, Qualifier qualifier = Qualifier());
-  static CountedPtr<BasicType> create(Kind kind, Qualifier qualifier);
+  static CountedPtr<BasicType> create(Kind kind,
+                                      Qualifier qualifier = Qualifier());
 };
 
 class PtrType : public DerivedType {
 public:
-  PtrType(Qualifier qualifier) : DerivedType(PTR, nullptr, qualifier) {}
+  PtrType(CountedPtr<Type> baseType = nullptr,
+          Qualifier qualifier = Qualifier())
+      : DerivedType(PTR, std::move(baseType), qualifier) {}
 };
 
 class ArrType : public DerivedType {

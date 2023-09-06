@@ -9,9 +9,10 @@ inc_src = [
 'frontend/Type.h',
 'frontend/Semantics.h',
 'frontend/IRGen.h',
+'frontend/Symbol.h',
 'ir/IR.h',
 'ir/IRPrinter.h',
 'ir/InstrBuilder.h',
-'ir/ConstructSSALazy.h'
+'ir/LazySSABuilder.h'
 ]
 install_headers(inc_src)

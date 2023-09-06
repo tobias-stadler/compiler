@@ -98,7 +98,7 @@ public:
       break;
     case Type::PTR:
       std::cout << "pointer to ";
-      printType(&static_cast<DerivedType *>(type)->getBaseType());
+      printType(static_cast<DerivedType *>(type)->getBaseType().get());
       break;
     case Type::FUNC: {
       std::cout << "function(";
@@ -112,7 +112,7 @@ public:
         printType(t.get());
       }
       std::cout << ") returning ";
-      printType(&p->getBaseType());
+      printType(p->getBaseType().get());
       break;
     }
     default:

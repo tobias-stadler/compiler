@@ -1,109 +1,116 @@
 #pragma once
 
+#include "frontend/Symbol.h"
 #include "frontend/Type.h"
 #include "ir/IR.h"
 #include "support/RefCount.h"
 #include <cassert>
-#include <utility>
-
-class Symbol {
-  friend class SymbolTable;
-
-public:
-  enum Kind { EMPTY, TYPE, EXTERN, STATIC, AUTO, REGISTER };
-  Symbol(Kind kind, CountedPtr<Type> type)
-      : kind(kind), type(std::move(type)) {}
-
-  Kind getKind() { return kind; }
-
-  Type &getType() { return *type; }
-
-  SSASymbolId getId() { return id; }
-
-private:
-  Kind kind;
-  CountedPtr<Type> type;
-  SSASymbolId id = 0;
-};
-
-class Scope {
-public:
-  using IdentId = unsigned;
-  enum Kind { FILE, FUNC, FUNC_PROTOTYPE, BLOCK };
-  Scope(Kind kind) : kind(kind) {}
-
-  Symbol *declareSymbol(IdentId identId, Symbol symbol);
-  Symbol *getSymbol(IdentId identId);
-  Kind getKind() { return kind; }
-
-  bool isFile() { return kind == FILE; };
-  bool isBlock() { return kind == BLOCK; };
-
-private:
-  Kind kind;
-  std::unordered_map<IdentId, Symbol> symbols;
-};
-
-class SymbolTable {
-public:
-  using IdentId = Scope::IdentId;
-  SymbolTable() {}
-  void pushScope(Scope::Kind kind) { scopes.emplace_back(kind); }
-
-  void popScope() {
-    assert(scopes.size() > 0);
-    scopes.pop_back();
-  }
-
-  Scope &scope() {
-    assert(scopes.size() > 0);
-    return scopes.back();
-  }
-
-  Scope &scope(unsigned n) {
-    assert(n < scopes.size());
-    return scopes[n];
-  }
-
-  Symbol *declareSymbol(std::string_view name, Symbol symbol) {
-    symbol.id = nextSymId;
-    Symbol *sym = scope().declareSymbol(declareIdent(name), std::move(symbol));
-    if (!sym) {
-      return nullptr;
-    }
-    ++nextSymId;
-    return sym;
-  }
-
-  IdentId declareIdent(std::string_view ident) {
-    auto [it, succ] = identIdMap.insert(std::make_pair(ident, nextIdentId));
-    if (succ) {
-      ++nextIdentId;
-    }
-    return it->second;
-  }
-
-  Symbol *getSymbol(std::string_view name) {
-    auto idIt = identIdMap.find(name);
-    if (idIt == identIdMap.end())
-      return nullptr;
-    for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-      auto *sym = it->getSymbol(idIt->second);
-      if (sym)
-        return sym;
-    }
-    return nullptr;
-  }
-
-private:
-  std::vector<Scope> scopes;
-  std::unordered_map<std::string_view, IdentId> identIdMap;
-  IdentId nextIdentId = 1;
-  SSASymbolId nextSymId = 1;
-};
 
 class ExpressionSemantics {
+public:
+  enum Action {
+    SSA_DOWNGRADE,
+    CONV_LVALUE,
+  };
+
+  enum Result {
+    SUCCESS,
+    ERROR,
+    ERROR_EXPECT_LVALUE,
+    ERROR_EXPECT_RVALUE,
+    ERROR_EXPECT_TYPE,
+  };
+
   enum Category { LVALUE, RVALUE };
+
+  class Handler {
+  public:
+    Result tryAction(Action action) {
+      switch (action) {
+      case SSA_DOWNGRADE:
+        return semanticSSADowngrade();
+      case CONV_LVALUE:
+        return semanticConvLValue();
+      }
+    }
+
+    void emitError(Result error) { semanticError(error); }
+
+  private:
+    virtual Result semanticConvLValue() = 0;
+    virtual Result semanticSSADowngrade() = 0;
+    virtual void semanticError(Result error) = 0;
+  };
+
+  ExpressionSemantics(Handler &handler) : handler(&handler) {}
+
+  Category getCategory() { return category; }
+
+  CountedPtr<Type> &getType() { return type; }
+
+  void fromSymbol(Symbol &sym) {
+    category = LVALUE;
+    type = sym.getType();
+  }
+
+  void fromConstant(CountedPtr<Type> ty) {
+    category = RVALUE;
+    type = std::move(ty);
+  }
+
+  void deref() {
+    expectRValue();
+    expectTypeKind(Type::PTR);
+    category = LVALUE;
+    type = std::move(static_cast<PtrType *>(type.get())->getBaseType());
+  }
+
+  void addr() {
+    expectLValue();
+    tryAction(SSA_DOWNGRADE);
+    category = RVALUE;
+    type = make_counted<PtrType>(std::move(type));
+  }
+
+  void setCategory(Category c) { category = c; }
+
+  void expectLValue() {
+    if (category != LVALUE) {
+      error(ERROR_EXPECT_LVALUE);
+    }
+  }
+
+  void tryAction(Action action) {
+    auto res = handler->tryAction(action);
+    if (res != SUCCESS) {
+      error(res);
+    }
+  }
+
+  void tryAction(Action action, Result err) {
+    if (handler->tryAction(action) != SUCCESS) {
+      error(err);
+    }
+  }
+
+  void error(Result err) { handler->emitError(err); }
+
+  void expectRValue() {
+    if (category != RVALUE) {
+      tryAction(CONV_LVALUE, ERROR_EXPECT_RVALUE);
+      category = RVALUE;
+    }
+  }
+
+  void expectTypeKind(Type::Kind kind) {
+    assert(type);
+    if (type->getKind() != kind) {
+      error(ERROR_EXPECT_TYPE);
+    }
+  }
+
+private:
   CountedPtr<Type> type;
   Category category;
+  Handler *handler;
 };

@@ -233,7 +233,7 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
     if (!decl) {
       return error("Expected decl after ptr-decl");
     }
-    decl->spliceEnd(DeclaratorAST(make_counted<PtrType>(quali)));
+    decl->spliceEnd(DeclaratorAST(make_counted<PtrType>(nullptr, quali)));
     return decl;
   }
   default:

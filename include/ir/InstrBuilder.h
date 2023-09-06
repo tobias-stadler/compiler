@@ -48,9 +48,7 @@ public:
     insertionPoint = &block.getSentryEnd();
   }
 
-  Instr* getLastInstr() {
-    return lastInstr;
-  }
+  Instr *getLastInstr() { return lastInstr; }
 
   void emit(Instr *instr) {
     assert(insertionPoint);

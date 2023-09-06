@@ -2,8 +2,10 @@
 #include "frontend/AST.h"
 #include "frontend/ASTVisitor.h"
 #include "frontend/Semantics.h"
-#include "ir/ConstructSSALazy.h"
+#include "frontend/Symbol.h"
+#include "frontend/Type.h"
 #include "ir/IR.h"
+#include "ir/LazySSABuilder.h"
 #include <cassert>
 #include <cstdlib>
 #include <memory>
@@ -12,8 +14,11 @@
 
 namespace {
 
-class IRGenASTVisitor : public ASTVisitor<IRGenASTVisitor> {
+class IRGenASTVisitor : public ASTVisitor<IRGenASTVisitor>,
+                        public ExpressionSemantics::Handler {
 public:
+  IRGenASTVisitor() : sema(*this) {}
+
   void visitTranslationUnit(TranslationUnitAST &ast) {
     sym.pushScope(Scope::FILE);
     for (auto &d : ast.declarations) {
@@ -48,10 +53,9 @@ public:
     if (sym.scope().isFile()) {
       assert(false && "Global declaration unsupported");
     } else if (sym.scope().isBlock()) {
-      Symbol::Kind k = ast.spec.symbolKind;
-      k = k == Symbol::EMPTY ? Symbol::AUTO : k;
       for (auto &d : ast.declarators) {
-        auto s = sym.declareSymbol(d.ident, Symbol(k, std::move(d.type)));
+        auto s =
+            sym.declareSymbol(d.ident, Symbol(Symbol::AUTO, std::move(d.type)));
         if (!s) {
           error("Symbol redeclared");
         }
@@ -72,6 +76,7 @@ public:
   void visitNum(NumAST &ast) {
     ssa->emitConstInt(IntSSAType::get(32), ast.num);
     tmpOperand = &ssa.getDef();
+    sema.fromConstant(BasicType::create(Type::SINT));
   }
 
   void visitVar(VarAST &ast) {
@@ -79,31 +84,32 @@ public:
     if (!tmpSymbol) {
       error("Symbol undeclared");
     }
-    tmpOperand = ssa.loadLocal(tmpSymbol->getId());
-    if (!tmpOperand) {
-      error("Def not found");
-    }
+    sema.fromSymbol(*tmpSymbol);
   }
+
+  void visitUnop(UnopAST &ast) { assert(false && "Unop unsupported"); }
 
   void visitBinop(BinopAST &ast) {
     switch (ast.getKind()) {
     case AST::ASSIGN: {
-      assert(ast.getLHS().getKind() == AST::VAR);
-      VarAST &lhs = static_cast<VarAST &>(ast.getLHS());
-      Symbol *s = sym.getSymbol(lhs.ident);
-      if (!s) {
-        error("Symbol undeclared");
-      }
       dispatch(ast.getRHS());
-      ssa.storeLocal(s->getId(), *tmpOperand);
+      sema.expectRValue();
+      Operand *rhs = tmpOperand;
+      dispatch(ast.getLHS());
+      sema.expectLValue();
+      ssa.storeSSA(tmpSymbol->getId(), *rhs);
+      sema.setCategory(ExpressionSemantics::RVALUE);
       break;
     }
     case AST::ADD: {
       dispatch(ast.getLHS());
+      sema.expectRValue();
       Operand *lhs = tmpOperand;
       dispatch(ast.getRHS());
+      sema.expectRValue();
       ssa->emitAdd(*lhs, *tmpOperand);
       tmpOperand = &ssa.getDef();
+      sema.setCategory(ExpressionSemantics::RVALUE);
       break;
     }
     default:
@@ -136,10 +142,26 @@ public:
     exit(1);
   }
 
-  Operand *tmpOperand;
-  Symbol *tmpSymbol;
+  ExpressionSemantics::Result semanticConvLValue() {
+    tmpOperand = ssa.loadSSA(tmpSymbol->getId());
+    if (!tmpOperand) {
+      return ExpressionSemantics::ERROR;
+    }
+    return ExpressionSemantics::SUCCESS;
+  }
+  ExpressionSemantics::Result semanticSSADowngrade() {
+    return ExpressionSemantics::ERROR;
+  }
+  void semanticError(ExpressionSemantics::Result err) {
+    error("Semantics error");
+  }
+
+  Operand *tmpOperand = nullptr;
+  Symbol *tmpSymbol = nullptr;
+
   SymbolTable sym;
   SSABuilder ssa;
+  ExpressionSemantics sema;
 };
 } // namespace
 

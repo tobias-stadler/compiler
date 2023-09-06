@@ -1,5 +1,5 @@
 #pragma once
-#include "frontend/Semantics.h"
+#include "frontend/Symbol.h"
 #include "frontend/Type.h"
 #include "support/RefCount.h"
 #include <cassert>
@@ -166,21 +166,6 @@ public:
 
 private:
   Ptr expr, st;
-};
-
-class DeclSpec {
-public:
-  DeclSpec() = default;
-  DeclSpec(Symbol::Kind symbolKind, Type::Kind typeKind,
-           Type::Qualifier qualifier)
-      : symbolKind(symbolKind), typeKind(typeKind), qualifier(qualifier) {}
-  Symbol::Kind symbolKind = Symbol::EMPTY;
-  Type::Kind typeKind = Type::EMPTY;
-  Type::Qualifier qualifier;
-
-  CountedPtr<BasicType> createType() {
-    return BasicType::create(typeKind, qualifier);
-  }
 };
 
 class DeclaratorAST : public AST {

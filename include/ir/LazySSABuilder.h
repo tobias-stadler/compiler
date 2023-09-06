@@ -54,14 +54,21 @@ public:
 private:
   std::unordered_map<SSASymbolId, Operand *> symbols;
   bool marked = false;
-  bool sealed = false;
+  bool sealed = true;
+};
+
+class SSASymbol {
+  enum Storage {
+    SSA,
+    ALLOCA,
+  };
 };
 
 class SSABuilder {
 public:
   SSABuilder() : program(std::make_unique<Program>()) {}
 
-  Operand *loadLocal(SSASymbolId id, Block &block) {
+  Operand *loadSSA(SSASymbolId id, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     SSADef &blockSSADef = block.getDef().ssaDef();
 
@@ -78,7 +85,7 @@ public:
       return nullptr;
     }
     if (numPreds == 1) {
-      def = loadLocal(id, blockSSADef.begin()->getParentBlock());
+      def = loadSSA(id, blockSSADef.begin()->getParentBlock());
       renum.set(id, def);
       return def;
     }
@@ -100,7 +107,7 @@ public:
       renum.set(id, phi->getDef());
       for (auto &pred : blockSSADef) {
         Block &predBlock = pred.getParentBlock();
-        Operand *predDef = loadLocal(id, predBlock);
+        Operand *predDef = loadSSA(id, predBlock);
         if (!predDef) {
           continue;
         }
@@ -115,19 +122,19 @@ public:
     return def;
   }
 
-  Operand *loadLocal(SSASymbolId id) {
+  Operand *loadSSA(SSASymbolId id) {
     assert(currBlock);
-    return loadLocal(id, *currBlock);
+    return loadSSA(id, *currBlock);
   }
 
-  void storeLocal(SSASymbolId id, Operand &def, Block &block) {
+  void storeSSA(SSASymbolId id, Operand &def, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     renum.set(id, def);
   }
 
-  void storeLocal(SSASymbolId id, Operand &def) {
+  void storeSSA(SSASymbolId id, Operand &def) {
     assert(currBlock);
-    storeLocal(id, def, *currBlock);
+    storeSSA(id, def, *currBlock);
   }
 
   Function &startFunction() {
@@ -184,6 +191,12 @@ public:
 
   InstrBuilder &operator*() { return instr; }
   InstrBuilder *operator->() { return &instr; }
+
+  void ensureStackSlot(SSASymbolId id, SSAType &type) {}
+
+  void storeStack(SSASymbolId id) {}
+
+  Operand *loadStack(SSASymbolId id) {}
 
 private:
   std::unique_ptr<Program> program;

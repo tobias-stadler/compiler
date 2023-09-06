@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
   auto prog = IRGenAST(**ast);
   PrintIR(*prog);
 
-  auto& t = VoidSSAType::get();
+  auto &t = VoidSSAType::get();
 
   /*
   Function func;
