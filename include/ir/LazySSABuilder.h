@@ -48,6 +48,7 @@ public:
   }
 
   static SSARenumberTable &getTable(Block &b) {
+    assert(b.userData);
     return *static_cast<SSARenumberTable *>(b.userData);
   }
 
@@ -57,16 +58,9 @@ private:
   bool sealed = true;
 };
 
-class SSASymbol {
-  enum Storage {
-    SSA,
-    ALLOCA,
-  };
-};
-
 class SSABuilder {
 public:
-  SSABuilder() : program(std::make_unique<Program>()) {}
+  SSABuilder() {}
 
   Operand *loadSSA(SSASymbolId id, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
@@ -137,6 +131,12 @@ public:
     storeSSA(id, def, *currBlock);
   }
 
+  Program& startProgram() {
+    assert(!program);
+    program = std::make_unique<Program>();
+    return *program;
+  }
+
   Function &startFunction() {
     assert(!currFunc);
     auto func = std::make_unique<Function>();
@@ -187,16 +187,10 @@ public:
     return instr.getLastInstr()->getDef();
   }
 
-  std::unique_ptr<Program> finish() { return std::move(program); }
+  std::unique_ptr<Program> endProgram() { return std::move(program); }
 
   InstrBuilder &operator*() { return instr; }
   InstrBuilder *operator->() { return &instr; }
-
-  void ensureStackSlot(SSASymbolId id, SSAType &type) {}
-
-  void storeStack(SSASymbolId id) {}
-
-  Operand *loadStack(SSASymbolId id) {}
 
 private:
   std::unique_ptr<Program> program;

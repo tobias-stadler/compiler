@@ -3,20 +3,6 @@
 #include <map>
 #include <utility>
 
-void SSAUse::unlink() {
-  if (chPrev) {
-    chPrev->ssaUse().chNext = chNext;
-  } else if (def) {
-    def->ssaDef().chNext = chNext;
-  }
-  if (chNext) {
-    chNext->ssaUse().chPrev = chPrev;
-  }
-  def = nullptr;
-  chNext = nullptr;
-  chPrev = nullptr;
-}
-
 namespace {
 std::map<unsigned, IntSSAType> otherIntTypes;
 } // namespace
@@ -38,6 +24,28 @@ void SSADef::unlinkAllUses() {
     tmp.def = nullptr;
     tmp.chPrev = nullptr;
     tmp.chNext = nullptr;
+  }
+  chNext = nullptr;
+}
+
+void SSAUse::unlink() {
+  if (chPrev) {
+    chPrev->ssaUse().chNext = chNext;
+  } else if (def) {
+    def->ssaDef().chNext = chNext;
+  }
+  if (chNext) {
+    chNext->ssaUse().chPrev = chPrev;
+  }
+  def = nullptr;
+  chNext = nullptr;
+  chPrev = nullptr;
+}
+
+void SSADef::replaceAllUses(Operand &newDef) {
+  newDef.ssaDef().chNext = chNext;
+  for (Operand *use = chNext; use; use = use->ssaUse().chNext) {
+    use->ssaUse().def = &newDef;
   }
   chNext = nullptr;
 }

@@ -21,7 +21,7 @@ public:
     ERROR_EXPECT_TYPE,
   };
 
-  enum Category { LVALUE, RVALUE };
+  enum Category { LVALUE_SYMBOL, LVALUE_MEM, RVALUE };
 
   class Handler {
   public:
@@ -49,7 +49,7 @@ public:
   CountedPtr<Type> &getType() { return type; }
 
   void fromSymbol(Symbol &sym) {
-    category = LVALUE;
+    category = LVALUE_SYMBOL;
     type = sym.getType();
   }
 
@@ -61,21 +61,27 @@ public:
   void deref() {
     expectRValue();
     expectTypeKind(Type::PTR);
-    category = LVALUE;
+    category = LVALUE_MEM;
     type = std::move(static_cast<PtrType *>(type.get())->getBaseType());
   }
 
   void addr() {
     expectLValue();
-    tryAction(SSA_DOWNGRADE);
+    if (category == LVALUE_SYMBOL)
+      tryAction(SSA_DOWNGRADE);
     category = RVALUE;
     type = make_counted<PtrType>(std::move(type));
   }
 
   void setCategory(Category c) { category = c; }
 
+  bool isLValue() {
+    return category == LVALUE_SYMBOL || category == LVALUE_MEM;
+  }
+  bool isRValue() { return category == RVALUE; }
+
   void expectLValue() {
-    if (category != LVALUE) {
+    if (!isLValue()) {
       error(ERROR_EXPECT_LVALUE);
     }
   }
@@ -87,18 +93,16 @@ public:
     }
   }
 
-  void tryAction(Action action, Result err) {
-    if (handler->tryAction(action) != SUCCESS) {
-      error(err);
-    }
-  }
-
   void error(Result err) { handler->emitError(err); }
 
   void expectRValue() {
     if (category != RVALUE) {
-      tryAction(CONV_LVALUE, ERROR_EXPECT_RVALUE);
-      category = RVALUE;
+      if (isLValue()) {
+        tryAction(CONV_LVALUE);
+        category = RVALUE;
+      } else {
+        error(ERROR_EXPECT_RVALUE);
+      }
     }
   }
 

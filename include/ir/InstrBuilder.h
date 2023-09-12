@@ -1,7 +1,9 @@
 #pragma once
 
 #include "ir/IR.h"
+#include "support/IntrusiveList.h"
 #include <cassert>
+#include <numbers>
 
 class InstrPtr {
 public:
@@ -35,20 +37,38 @@ public:
   }
 };
 
+class AllocaInstrPtr : public InstrPtr {
+  AllocaInstrPtr(Instr *instr) : InstrPtr(instr) {
+    assert(instr->getKind() == Instr::INSTR_ALLOCA);
+  }
+};
+
 class InstrBuilder {
 public:
   InstrBuilder() = default;
-  InstrBuilder(Instr &insertionPoint) : insertionPoint(&insertionPoint) {}
+  InstrBuilder(IntrusiveListNode<Instr, Block> &insertionPoint)
+      : insertionPoint(&insertionPoint) {}
+  InstrBuilder(IntrusiveListNode<Instr, Block> *insertionPoint)
+      : insertionPoint(insertionPoint) {}
   InstrBuilder(Block &insertionPoint)
       : insertionPoint(&insertionPoint.getSentryEnd()) {}
 
-  void setInsertionPoint(Instr *instr) { insertionPoint = instr; }
-  void setInsertionPoint(Instr &instr) { insertionPoint = &instr; }
+  void setInsertionPoint(IntrusiveListNode<Instr, Block> *node) {
+    insertionPoint = node;
+  }
+  void setInsertionPoint(IntrusiveListNode<Instr, Block> &node) {
+    insertionPoint = &node;
+  }
   void setInsertionPoint(Block &block) {
     insertionPoint = &block.getSentryEnd();
   }
 
   Instr *getLastInstr() { return lastInstr; }
+
+  Operand &getDef(unsigned n = 0) {
+    assert(lastInstr);
+    return lastInstr->getDef(n);
+  }
 
   void emit(Instr *instr) {
     assert(insertionPoint);
@@ -79,6 +99,47 @@ public:
   PhiInstrPtr buildPhi() {
     Instr *i = new Instr(Instr::INSTR_PHI);
     return i;
+  }
+
+  Instr &emitAlloca(SSAType &eleType, unsigned numEle) {
+    Instr *i = new Instr(Instr::INSTR_ALLOCA);
+    i->allocateOperands(3);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
+    i->emplaceOperand<Operand::TYPE>(&eleType);
+    i->emplaceOperand<Operand::IMM32>(numEle);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitAlloca(SSAType &eleType, Operand &numEleOp) {
+    Instr *i = new Instr(Instr::INSTR_ALLOCA);
+    i->allocateOperands(3);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
+    i->emplaceOperand<Operand::TYPE>(&eleType);
+    i->emplaceOperand<Operand::SSA_USE>(numEleOp);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitLoad(SSAType &type, Operand &addr) {
+    assert(addr.ssaDefType() == PtrSSAType::get());
+    Instr *i = new Instr(Instr::INSTR_LOAD);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i->emplaceOperand<Operand::SSA_USE>(addr);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitStore(Operand &addr, Operand &val) {
+    assert(addr.ssaDefType() == PtrSSAType::get());
+    assert(val.getKind() == Operand::SSA_DEF_TYPE);
+    Instr *i = new Instr(Instr::INSTR_STORE);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::SSA_USE>(addr);
+    i->emplaceOperand<Operand::SSA_USE>(val);
+    emit(i);
+    return *i;
   }
 
   Instr &emitCmp(BrCond cond, Operand &lhs, Operand &rhs) {

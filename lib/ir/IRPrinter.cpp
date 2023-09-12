@@ -100,7 +100,9 @@ public:
     case Operand::DEF_REG:
     case Operand::USE_REG:
     case Operand::BLOCK:
-      assert(false);
+    case Operand::TYPE:
+    case Operand::CHAIN:
+      std::cout << "unnamed";
       break;
     case Operand::BRCOND:
       std::cout << BrCond::kindName(op.brCond().getKind());

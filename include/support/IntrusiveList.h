@@ -24,6 +24,16 @@ public:
     return *static_cast<N *>(prev);
   }
 
+  IntrusiveListNode &getNextNode() {
+    assert(next);
+    return *next;
+  }
+
+  IntrusiveListNode &getPrevNode() {
+    assert(prev);
+    return *prev;
+  }
+
   P &getParent() {
     assert(isLinked());
     return *static_cast<P *>(parent);

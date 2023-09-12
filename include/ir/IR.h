@@ -194,6 +194,7 @@ public:
   ~SSADef() { unlinkAllUses(); }
 
   void unlinkAllUses();
+  void replaceAllUses(Operand &newDef);
 
   class iterator {
   public:
@@ -274,6 +275,7 @@ public:
     DEF_REG,
     USE_REG,
     BLOCK,
+    TYPE,
     IMM32,
     BRCOND,
     CHAIN,
@@ -345,6 +347,8 @@ public:
       new (&contentBrCond) BrCond(std::forward<ARGS>(args)...);
     } else if constexpr (K == BLOCK) {
       new (&contentBlock) Block *(std::forward<ARGS>(args)...);
+    } else if constexpr (K == TYPE) {
+      new (&contentType) SSAType *(std::forward<ARGS>(args)...);
     } else if constexpr (K == EMPTY) {
     } else if constexpr (K == CHAIN) {
       new (&contentChain) OperandChain(std::forward<ARGS>(args)...);
@@ -391,6 +395,11 @@ public:
     return *contentBlock;
   }
 
+  SSAType &type() {
+    assert(kind == TYPE && contentType);
+    return *contentType;
+  }
+
   BrCond brCond() {
     assert(kind == BRCOND);
     return contentBrCond;
@@ -413,6 +422,12 @@ public:
     }
 
     def.chNext = &useOp;
+  }
+
+  void ssaUseReplace(Operand &newDef) {
+    SSAUse &use = ssaUse();
+    use.unlink();
+    newDef.ssaDefAddUse(*this);
   }
 
   SSAUse &ssaUse() {
@@ -442,6 +457,7 @@ private:
     unsigned contentReg;
     int32_t contentImm32;
     Block *contentBlock;
+    SSAType *contentType;
     BrCond contentBrCond;
   };
 };
@@ -462,6 +478,11 @@ class Function : public IntrusiveList<Block, Function> {
 
 public:
   Function() { funcDef.emplace<Operand::SSA_DEF_FUNCTION>(nullptr, *this); }
+
+  Block &getEntry() {
+    assert(begin() != end());
+    return *begin();
+  }
 
 private:
   Operand funcDef;

@@ -10,6 +10,7 @@ class Symbol {
 
 public:
   enum Kind { EMPTY, TYPE, EXTERN, STATIC, AUTO, REGISTER };
+  enum StorageKind { SSA, ALLOCA };
   Symbol(Kind kind, CountedPtr<Type> type)
       : kind(kind), type(std::move(type)) {}
 
