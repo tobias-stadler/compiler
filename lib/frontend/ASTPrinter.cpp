@@ -115,8 +115,48 @@ public:
       printType(p->getBaseType().get());
       break;
     }
+    case Type::VOID:
+      std::cout << "void";
+      break;
+    case Type::BOOL:
+      std::cout << "bool";
+      break;
+    case Type::SCHAR:
+      std::cout << "signed char";
+      break;
+    case Type::SSHORT:
+      std::cout << "signed short";
+      break;
+    case Type::SLONG:
+      std::cout << "signed long";
+      break;
+    case Type::SLONGLONG:
+      std::cout << "signed long long";
+      break;
+    case Type::UCHAR:
+      std::cout << "unsigned char";
+      break;
+    case Type::USHORT:
+      std::cout << "unsigned short";
+      break;
+    case Type::UINT:
+      std::cout << "unsigned int";
+      break;
+    case Type::ULONG:
+      std::cout << "unsigned long";
+      break;
+    case Type::ULONGLONG:
+      std::cout << "unsigned long long";
+      break;
+    case Type::ARR:
+      std::cout << "array";
+      break;
+    case Type::STRUCT:
+      std::cout << "struct";
+      break;
     default:
       std::cout << "unnamed";
+      break;
     }
   }
 };

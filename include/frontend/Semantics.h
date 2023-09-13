@@ -4,13 +4,15 @@
 #include "frontend/Type.h"
 #include "ir/IR.h"
 #include "support/RefCount.h"
+#include <algorithm>
 #include <cassert>
 
 class ExpressionSemantics {
 public:
   enum Action {
     CONV_LVALUE,
-    CONV_BOOL_CMPZERO,
+    CONV_BOOL,
+    CONV_INT,
   };
 
   enum Result {
@@ -23,22 +25,96 @@ public:
 
   enum Category { LVALUE_SYMBOL, LVALUE_MEM, RVALUE };
 
+  static constexpr unsigned intConvRank(Type::Kind kind) {
+    switch (kind) {
+    case Type::BOOL:
+      return 1;
+    case Type::SCHAR:
+    case Type::UCHAR:
+      return 2;
+    case Type::SSHORT:
+    case Type::USHORT:
+      return 3;
+    case Type::SINT:
+    case Type::UINT:
+      return 4;
+    case Type::SLONG:
+    case Type::ULONG:
+      return 5;
+    case Type::SLONGLONG:
+    case Type::ULONGLONG:
+      return 6;
+    default:
+      return 0;
+    }
+  }
+
+  static constexpr Type::Kind intPromotion(Type::Kind kind) {
+    if (intConvRank(kind) > intConvRank(Type::SINT)) {
+      return kind;
+    }
+    switch (kind) {
+    default:
+      return kind;
+    case Type::BOOL:
+    case Type::SCHAR:
+    case Type::UCHAR:
+    case Type::SSHORT:
+    case Type::USHORT:
+    case Type::SINT:
+      return Type::SINT;
+    case Type::UINT:
+      return Type::UINT;
+    }
+  }
+
+  static constexpr Type::Kind usualArithConv(Type::Kind lhs, Type::Kind rhs) {
+    if (!(Type::isInteger(lhs) && Type::isInteger(rhs))) {
+      return Type::EMPTY;
+    }
+    lhs = intPromotion(lhs);
+    rhs = intPromotion(rhs);
+    if (lhs == rhs) {
+      return lhs;
+    }
+    bool lhsSigned = Type::isSigned(lhs);
+    bool rhsSigned = Type::isSigned(rhs);
+    unsigned lhsRank = intConvRank(lhs);
+    unsigned rhsRank = intConvRank(rhs);
+    if (lhsSigned == rhsSigned) {
+      if (lhsRank < rhsRank) {
+        return rhs;
+      } else {
+        return lhs;
+      }
+    }
+    Type::Kind signedKind = lhsSigned ? lhs : rhs;
+    Type::Kind unsignedKind = lhsSigned ? rhs : lhs;
+    unsigned signedRank = lhsSigned ? lhsRank : rhsRank;
+    unsigned unsignedRank = lhsSigned ? rhsRank : lhsRank;
+    if (unsignedRank >= signedRank) {
+      return unsignedKind;
+    }
+    // TODO: Check if signed type can represent all values of unsigned type
+    return signedKind;
+  }
+
   class Handler {
   public:
     Result tryAction(Action action) {
       switch (action) {
       case CONV_LVALUE:
         return semanticConvLValue();
-      case CONV_BOOL_CMPZERO:
+      case CONV_BOOL:
         return semanticConvBool();
+      default:
+        return ERROR;
       }
     }
 
-    void emitError(Result error) { semanticError(error); }
-
-  private:
     virtual Result semanticConvLValue() = 0;
     virtual Result semanticConvBool() = 0;
+    virtual Result semanticConvInt(Type::Kind expectedKind) = 0;
     virtual void semanticError(Result error) = 0;
   };
 
@@ -53,7 +129,7 @@ public:
     type = sym.getType();
   }
 
-  void fromConstant(CountedPtr<Type> ty) {
+  void fromType(CountedPtr<Type> ty) {
     category = RVALUE;
     type = std::move(ty);
   }
@@ -72,17 +148,12 @@ public:
   }
 
   void setCategory(Category c) { category = c; }
+  void setType(CountedPtr<Type> ty) { type = std::move(ty); }
 
   bool isLValue() {
     return category == LVALUE_SYMBOL || category == LVALUE_MEM;
   }
   bool isRValue() { return category == RVALUE; }
-
-  void expectLValue() {
-    if (!isLValue()) {
-      error(ERROR_EXPECT_LVALUE);
-    }
-  }
 
   void tryAction(Action action) {
     auto res = handler->tryAction(action);
@@ -91,7 +162,13 @@ public:
     }
   }
 
-  void error(Result err) { handler->emitError(err); }
+  void error(Result err) { handler->semanticError(err); }
+
+  void expectLValue() {
+    if (!isLValue()) {
+      error(ERROR_EXPECT_LVALUE);
+    }
+  }
 
   void expectRValue() {
     if (category == RVALUE) {
@@ -111,9 +188,15 @@ public:
       return;
     }
     if (expectedKind == Type::BOOL) {
-      if (Type::isInteger(type->getKind())) {
-        tryAction(CONV_BOOL_CMPZERO);
+      if (Type::isInteger(type->getKind()) &&
+          handler->semanticConvBool() == SUCCESS) {
         type = BasicType::create(Type::BOOL);
+        return;
+      }
+    } else if (Type::isInteger(expectedKind) &&
+               Type::isInteger(type->getKind())) {
+      if (handler->semanticConvInt(expectedKind) == SUCCESS) {
+        type = BasicType::create(expectedKind);
         return;
       }
     }

@@ -504,6 +504,7 @@ private:
 class Instr : public IntrusiveListNode<Instr, Block> {
 public:
   enum Kind {
+    EMPTY,
     CONST_INT,
     INSTR_START,
     INSTR_PHI,
@@ -511,7 +512,8 @@ public:
     INSTR_SUB,
     INSTR_MULU,
     INSTR_MULS,
-    INSTR_DIV,
+    INSTR_DIVU,
+    INSTR_DIVS,
     INSTR_SHL,
     INSTR_SHR,
     INSTR_SHR_A,
@@ -526,6 +528,7 @@ public:
     INSTR_EXTZ,
     INSTR_EXTS,
     INSTR_TRUNC,
+    INSTR_COPY,
     INSTR_LOAD,
     INSTR_STORE,
     INSTR_ALLOCA,
@@ -554,8 +557,10 @@ public:
       return "MULu";
     case INSTR_MULS:
       return "MULs";
-    case INSTR_DIV:
-      return "DIV";
+    case INSTR_DIVU:
+      return "DIVu";
+    case INSTR_DIVS:
+      return "DIVs";
     case INSTR_SHL:
       return "SHL";
     case INSTR_SHR:
@@ -584,6 +589,8 @@ public:
       return "EXTs";
     case INSTR_TRUNC:
       return "TRUNC";
+    case INSTR_COPY:
+      return "COPY";
     case INSTR_LOAD:
       return "LOAD";
     case INSTR_STORE:

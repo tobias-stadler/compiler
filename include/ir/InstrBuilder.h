@@ -101,6 +101,55 @@ public:
     return i;
   }
 
+  Instr &emitExt(SSAType &type, Operand &val, bool isSigned = false) {
+    assert(val.ssaDefType().getKind() == SSAType::INT &&
+           type.getKind() == SSAType::INT);
+    assert(static_cast<IntSSAType &>(type).getBits() >
+           static_cast<IntSSAType &>(val.ssaDefType()).getBits());
+    Instr *i = new Instr(isSigned ? Instr::INSTR_EXTS : Instr::INSTR_EXTZ);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i->emplaceOperand<Operand::SSA_USE>(val);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitTrunc(SSAType &type, Operand &val) {
+    assert(val.ssaDefType().getKind() == SSAType::INT &&
+           type.getKind() == SSAType::INT);
+    assert(static_cast<IntSSAType &>(type).getBits() <
+           static_cast<IntSSAType &>(val.ssaDefType()).getBits());
+    Instr *i = new Instr(Instr::INSTR_TRUNC);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i->emplaceOperand<Operand::SSA_USE>(val);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitCopy(Operand &val) {
+    Instr *i = new Instr(Instr::INSTR_COPY);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
+    i->emplaceOperand<Operand::SSA_USE>(val);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitExtOrTrunc(SSAType &type, Operand &val, bool isSigned = false) {
+    assert(val.ssaDefType().getKind() == SSAType::INT &&
+           type.getKind() == SSAType::INT);
+    unsigned dstBits = static_cast<IntSSAType &>(type).getBits();
+    unsigned srcBits = static_cast<IntSSAType &>(val.ssaDefType()).getBits();
+    if (dstBits < srcBits) {
+      return emitTrunc(type, val);
+    } else if (dstBits > srcBits) {
+      return emitExt(type, val, isSigned);
+    } else {
+      return emitCopy(val);
+    }
+  }
+
   Instr &emitAlloca(SSAType &eleType, unsigned numEle) {
     Instr *i = new Instr(Instr::INSTR_ALLOCA);
     i->allocateOperands(3);

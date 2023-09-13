@@ -1,4 +1,5 @@
 #pragma once
+#include "ir/IR.h"
 #include "support/RefCount.h"
 #include <algorithm>
 #include <array>
@@ -17,8 +18,8 @@ public:
     EMPTY,
     BASIC_START,
     VOID,
-    BOOL,
     INTEGER_START,
+    BOOL,
     SCHAR,
     SSHORT,
     SINT,
@@ -58,16 +59,48 @@ public:
 
   Kind getKind() { return kind; }
 
-  static bool isBasic(Kind kind) {
+  static constexpr bool isBasic(Kind kind) {
     return kind > BASIC_START && kind < BASIC_END;
   }
 
-  static bool isDerived(Kind kind) {
+  static constexpr bool isDerived(Kind kind) {
     return kind > DERIVED_START && kind < DERIVED_END;
   }
 
-  static bool isInteger(Kind kind) {
+  static constexpr bool isInteger(Kind kind) {
     return kind > INTEGER_START && kind < INTEGER_END;
+  }
+
+  static bool isSigned(Kind kind) {
+    switch (kind) {
+    case SCHAR:
+    case SSHORT:
+    case SINT:
+    case SLONG:
+    case SLONGLONG:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  static SSAType &irType(Type::Kind kind) {
+    switch (kind) {
+    case Type::SCHAR:
+    case Type::UCHAR:
+      return IntSSAType::get(8);
+    case Type::SSHORT:
+    case Type::USHORT:
+      return IntSSAType::get(16);
+    case Type::SINT:
+    case Type::UINT:
+      return IntSSAType::get(32);
+    case Type::PTR:
+      return PtrSSAType::get();
+    default:
+      assert(false && "Unsupported type for direct IR conversion");
+      __builtin_unreachable();
+    }
   }
 
   static constexpr int NUM_BASIC = BASIC_END - BASIC_START - 1;
