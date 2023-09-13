@@ -82,8 +82,86 @@ public:
       return "Deref";
     case ADDR:
       return "Addr";
+    case EMPTY:
+      return "Empty";
+    case ASSIGN:
+      return "Assign";
+    case ASSIGN_ADD:
+      return "AssignAdd";
+    case ASSIGN_SUB:
+      return "AssignSub";
+    case ASSIGN_MUL:
+      return "AssignMul";
+    case ASSIGN_DIV:
+      return "AssignDiv";
+    case ASSIGN_MOD:
+      return "AssignMod";
+    case ASSIGN_AND:
+      return "AssignAnd";
+    case ASSIGN_OR:
+      return "AssignOr";
+    case ASSIGN_XOR:
+      return "AssignXor";
+    case ASSIGN_LSHIFT:
+      return "AssignShiftLeft";
+    case ASSIGN_RSHIFT:
+      return "AssignShiftRight";
+    case DIV:
+      return "Division";
+    case MOD:
+      return "Modulo";
+    case BIT_AND:
+      return "BitAnd";
+    case BIT_OR:
+      return "BitOr";
+    case BIT_NOT:
+      return "BitNot";
+    case BIT_XOR:
+      return "BitXor";
+    case LSHIFT:
+      return "ShiftLeft";
+    case RSHIFT:
+      return "ShiftRight";
+    case LOG_AND:
+      return "LogicalAnd";
+    case LOG_OR:
+      return "LogicalOr";
+    case LOG_NOT:
+      return "LogicalNot";
+    case INC_POST:
+      return "PostIncrement";
+    case DEC_PRE:
+      return "PreDecrement";
+    case DEC_POST:
+      return "PostDecrement";
+    case EQ:
+      return "==";
+    case NEQ:
+      return "!=";
+    case LT:
+      return "<";
+    case GT:
+      return ">";
+    case LTE:
+      return "<=";
+    case GTE:
+      return ">=";
+    case ST_COMPOUND:
+      return "CompoundStatement";
+    case ST_IF:
+      return "if";
+    case ST_WHILE:
+      return "while";
+    case DECLARATOR:
+      return "Declarator";
+    case DECLARATION:
+      return "Declaration";
+    case FUNCTION_DEFINITION:
+      return "FunctionDefinition";
+    case TRANSLATION_UNIT:
+      return "TranslationUnit";
     default:
-      return "Unnamed";
+      return "unnamed";
     }
   }
 
@@ -96,31 +174,24 @@ private:
   Kind kind;
 };
 
-class ExpressionAST : public AST {
+class UnopAST : public AST {
 public:
-  ExpressionAST(Kind kind) : AST(kind) {}
-};
-
-class UnopAST : public ExpressionAST {
-public:
-  std::unique_ptr<AST> child;
-  UnopAST(Kind kind, Ptr child)
-      : ExpressionAST(kind), child(std::move(child)) {}
+  UnopAST(Kind kind, Ptr child) : AST(kind), child(std::move(child)) {}
 
   AST &getSubExpression() { return *child; }
+
+  std::unique_ptr<AST> child;
 };
 
-class BinopAST : public ExpressionAST {
+class BinopAST : public AST {
 public:
   BinopAST(Kind kind, Ptr lhs, Ptr rhs)
-      : ExpressionAST(kind), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+      : AST(kind), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 
   AST &getLHS() { return *lhs; }
   AST &getRHS() { return *rhs; }
 
-private:
-  Ptr lhs;
-  Ptr rhs;
+  Ptr lhs, rhs;
 };
 
 class NumAST : public AST {
@@ -137,8 +208,9 @@ public:
 
 class CompoundStAST : public AST {
 public:
-  CompoundStAST() : AST(ST_COMPOUND) {}
+  CompoundStAST() : AST(ST_COMPOUND), scope(Scope::BLOCK) {}
   std::vector<Ptr> children;
+  Scope scope;
 };
 
 class IfStAST : public AST {
@@ -152,7 +224,6 @@ public:
   AST &getElseStatement() { return *stElse; }
   bool hasElseStatement() { return bool(stElse); }
 
-private:
   Ptr expr, st, stElse;
 };
 
@@ -164,7 +235,6 @@ public:
   AST &getExpression() { return *expr; }
   AST &getStatement() { return *st; }
 
-private:
   Ptr expr, st;
 };
 
@@ -210,12 +280,14 @@ public:
 
 class FunctionDefinitionAST : public AST {
 public:
-  FunctionDefinitionAST(DeclSpec spec, DeclaratorAST decl, Ptr st)
+  FunctionDefinitionAST(DeclSpec spec, DeclaratorAST decl)
       : AST(FUNCTION_DEFINITION), spec(std::move(spec)), decl(std::move(decl)),
-        st(std::move(st)) {}
+        funcScope(Scope::FUNC), blockScope(Scope::BLOCK) {}
   DeclSpec spec;
   DeclaratorAST decl;
   Ptr st;
+  Scope funcScope;
+  Scope blockScope;
 
   CompoundStAST &getStatement() {
     return *static_cast<CompoundStAST *>(st.get());
@@ -225,9 +297,10 @@ public:
 
 class TranslationUnitAST : public AST {
 public:
-  TranslationUnitAST() : AST(TRANSLATION_UNIT) {}
+  TranslationUnitAST() : AST(TRANSLATION_UNIT), scope(Scope::FILE) {}
 
   std::vector<Ptr> declarations;
+  Scope scope;
 };
 
 class ASTError {

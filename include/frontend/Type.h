@@ -17,6 +17,8 @@ public:
     EMPTY,
     BASIC_START,
     VOID,
+    BOOL,
+    INTEGER_START,
     SCHAR,
     SSHORT,
     SINT,
@@ -27,6 +29,7 @@ public:
     UINT,
     ULONG,
     ULONGLONG,
+    INTEGER_END,
     BASIC_END,
     DERIVED_START,
     ARR,
@@ -35,6 +38,7 @@ public:
     PTR,
     DERIVED_END
   };
+
   class Qualifier {
   public:
     Qualifier(bool qConst = false, bool qVolatile = false,
@@ -60,6 +64,10 @@ public:
 
   static bool isDerived(Kind kind) {
     return kind > DERIVED_START && kind < DERIVED_END;
+  }
+
+  static bool isInteger(Kind kind) {
+    return kind > INTEGER_START && kind < INTEGER_END;
   }
 
   static constexpr int NUM_BASIC = BASIC_END - BASIC_START - 1;

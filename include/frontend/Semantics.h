@@ -9,8 +9,8 @@
 class ExpressionSemantics {
 public:
   enum Action {
-    SSA_DOWNGRADE,
     CONV_LVALUE,
+    CONV_BOOL_CMPZERO,
   };
 
   enum Result {
@@ -27,10 +27,10 @@ public:
   public:
     Result tryAction(Action action) {
       switch (action) {
-      case SSA_DOWNGRADE:
-        return semanticSSADowngrade();
       case CONV_LVALUE:
         return semanticConvLValue();
+      case CONV_BOOL_CMPZERO:
+        return semanticConvBool();
       }
     }
 
@@ -38,7 +38,7 @@ public:
 
   private:
     virtual Result semanticConvLValue() = 0;
-    virtual Result semanticSSADowngrade() = 0;
+    virtual Result semanticConvBool() = 0;
     virtual void semanticError(Result error) = 0;
   };
 
@@ -62,13 +62,11 @@ public:
     expectRValue();
     expectTypeKind(Type::PTR);
     category = LVALUE_MEM;
-    type = std::move(static_cast<PtrType *>(type.get())->getBaseType());
+    type = static_cast<PtrType *>(type.get())->getBaseType();
   }
 
   void addr() {
     expectLValue();
-    if (category == LVALUE_SYMBOL)
-      tryAction(SSA_DOWNGRADE);
     category = RVALUE;
     type = make_counted<PtrType>(std::move(type));
   }
@@ -96,21 +94,30 @@ public:
   void error(Result err) { handler->emitError(err); }
 
   void expectRValue() {
-    if (category != RVALUE) {
-      if (isLValue()) {
-        tryAction(CONV_LVALUE);
-        category = RVALUE;
-      } else {
-        error(ERROR_EXPECT_RVALUE);
-      }
+    if (category == RVALUE) {
+      return;
     }
+    if (isLValue()) {
+      tryAction(CONV_LVALUE);
+      category = RVALUE;
+      return;
+    }
+    error(ERROR_EXPECT_RVALUE);
   }
 
-  void expectTypeKind(Type::Kind kind) {
+  void expectTypeKind(Type::Kind expectedKind) {
     assert(type);
-    if (type->getKind() != kind) {
-      error(ERROR_EXPECT_TYPE);
+    if (type->getKind() == expectedKind) {
+      return;
     }
+    if (expectedKind == Type::BOOL) {
+      if (Type::isInteger(type->getKind())) {
+        tryAction(CONV_BOOL_CMPZERO);
+        type = BasicType::create(Type::BOOL);
+        return;
+      }
+    }
+    error(ERROR_EXPECT_TYPE);
   }
 
 private:

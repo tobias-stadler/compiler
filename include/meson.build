@@ -13,6 +13,7 @@ inc_src = [
 'ir/IR.h',
 'ir/IRPrinter.h',
 'ir/InstrBuilder.h',
+'ir/IRBuilder.h',
 'ir/LazySSABuilder.h'
 ]
 install_headers(inc_src)

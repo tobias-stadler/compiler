@@ -1,3 +1,4 @@
+#include "frontend/Symbol.h"
 #include <cstdlib>
 #include <frontend/AST.h>
 #include <frontend/ASTPrinter.h>
@@ -29,7 +30,8 @@ int main(int argc, char *argv[]) {
   f.read(str.data(), sz);
 
   Lexer lex(str);
-  Parser p(&lex);
+  SymbolTable sym;
+  Parser p(lex, sym);
 
   auto ast = p.parseTranslationUnit();
   if (!ast) {
@@ -39,7 +41,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Parsing finished\n";
   PrintAST(**ast);
 
-  auto prog = IRGenAST(**ast);
+  auto prog = IRGenAST(**ast, sym);
   PrintIR(*prog);
 
   auto &t = VoidSSAType::get();
@@ -64,6 +66,7 @@ int main(int argc, char *argv[]) {
   return EXIT_SUCCESS;
 }
 
+/*
 void interactive() {
   std::cout << "Hello\n";
   std::string line;
@@ -85,3 +88,4 @@ void interactive() {
   }
   return;
 }
+*/

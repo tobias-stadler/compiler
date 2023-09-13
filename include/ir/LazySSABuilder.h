@@ -12,7 +12,6 @@
 // https://compilers.cs.uni-saarland.de/papers/bbhlmz13cc.pdf
 
 class SSARenumberTable {
-
 public:
   Operand *get(SSASymbolId id) {
     auto it = symbols.find(id);
@@ -35,7 +34,10 @@ public:
   bool isMarked() { return marked; }
   bool isSealed() { return sealed; }
 
-  static void init(Block &block) { block.userData = new SSARenumberTable(); }
+  static void init(Block &block) {
+    assert(!block.userData);
+    block.userData = new SSARenumberTable();
+  }
   static void destroy(Block &block) {
     delete static_cast<SSARenumberTable *>(block.userData);
     block.userData = nullptr;
@@ -48,7 +50,9 @@ public:
   }
 
   static SSARenumberTable &getTable(Block &b) {
-    assert(b.userData);
+    if (!b.userData) {
+      init(b);
+    }
     return *static_cast<SSARenumberTable *>(b.userData);
   }
 
@@ -60,9 +64,7 @@ private:
 
 class SSABuilder {
 public:
-  SSABuilder() {}
-
-  Operand *loadSSA(SSASymbolId id, Block &block) {
+  static Operand *load(SSASymbolId id, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     SSADef &blockSSADef = block.getDef().ssaDef();
 
@@ -79,7 +81,7 @@ public:
       return nullptr;
     }
     if (numPreds == 1) {
-      def = loadSSA(id, blockSSADef.begin()->getParentBlock());
+      def = load(id, blockSSADef.begin()->getParentBlock());
       renum.set(id, def);
       return def;
     }
@@ -95,16 +97,15 @@ public:
       assert(false && "Endless recursion");
     } else {
       renum.setMarked(true);
-      auto phi = instr.buildPhi();
+      auto phi = InstrBuilder().buildPhi();
       phi.setupOperands(numPreds);
       block.insertBegin(phi.get());
-      renum.set(id, phi->getDef());
+      def = &phi->getDef();
+      renum.set(id, *def);
       for (auto &pred : blockSSADef) {
         Block &predBlock = pred.getParentBlock();
-        Operand *predDef = loadSSA(id, predBlock);
-        if (!predDef) {
-          continue;
-        }
+        Operand *predDef = load(id, predBlock);
+        assert(predDef);
         if (predDef->ssaDefType() != VoidSSAType::get()) {
           phi.setType(predDef->ssaDefType());
         }
@@ -116,85 +117,8 @@ public:
     return def;
   }
 
-  Operand *loadSSA(SSASymbolId id) {
-    assert(currBlock);
-    return loadSSA(id, *currBlock);
-  }
-
-  void storeSSA(SSASymbolId id, Operand &def, Block &block) {
+  static void store(SSASymbolId id, Operand &def, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     renum.set(id, def);
   }
-
-  void storeSSA(SSASymbolId id, Operand &def) {
-    assert(currBlock);
-    storeSSA(id, def, *currBlock);
-  }
-
-  Program& startProgram() {
-    assert(!program);
-    program = std::make_unique<Program>();
-    return *program;
-  }
-
-  Function &startFunction() {
-    assert(!currFunc);
-    auto func = std::make_unique<Function>();
-    currFunc = func.get();
-    program->addFunction(std::move(func));
-    return *currFunc;
-  }
-
-  Function &endFunction() {
-    assert(currFunc);
-    assert(!currBlock);
-    Function &func = *currFunc;
-    SSARenumberTable::destroy(func);
-    currFunc = nullptr;
-    return func;
-  }
-
-  Block &startBlock() {
-    assert(currFunc);
-    assert(!currBlock);
-    currBlock = new Block();
-    SSARenumberTable::init(*currBlock);
-    currFunc->insertEnd(currBlock);
-    instr.setInsertionPoint(*currBlock);
-    return *currBlock;
-  }
-
-  Block &endBlock() {
-    assert(currBlock);
-    Block &block = *currBlock;
-    currBlock = nullptr;
-    instr.setInsertionPoint(nullptr);
-    return block;
-  }
-
-  Block &getBlock() {
-    assert(currBlock);
-    return *currBlock;
-  }
-
-  Function &getFunc() {
-    assert(currFunc);
-    return *currFunc;
-  }
-
-  Operand &getDef() {
-    assert(instr.getLastInstr());
-    return instr.getLastInstr()->getDef();
-  }
-
-  std::unique_ptr<Program> endProgram() { return std::move(program); }
-
-  InstrBuilder &operator*() { return instr; }
-  InstrBuilder *operator->() { return &instr; }
-
-private:
-  std::unique_ptr<Program> program;
-  Function *currFunc;
-  Block *currBlock;
-  InstrBuilder instr;
 };

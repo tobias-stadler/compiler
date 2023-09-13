@@ -162,13 +162,13 @@ public:
     return *i;
   }
 
-  Instr &emitBrCond(Operand &cond, Block &dstFalse, Block &dstTrue) {
+  Instr &emitBrCond(Operand &cond, Block &dstTrue, Block &dstFalse) {
     assert(cond.ssaDefType() == IntSSAType::get(1));
     Instr *i = new Instr(Instr::INSTR_BR_COND);
     i->allocateOperands(3);
     i->emplaceOperand<Operand::SSA_USE>(cond);
-    i->emplaceOperand<Operand::SSA_USE>(dstFalse.getDef());
     i->emplaceOperand<Operand::SSA_USE>(dstTrue.getDef());
+    i->emplaceOperand<Operand::SSA_USE>(dstFalse.getDef());
     emit(i);
     return *i;
   }

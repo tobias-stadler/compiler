@@ -20,10 +20,14 @@ public:
 
   SSASymbolId getId() { return id; }
 
+  bool isAddrTaken() { return addrTaken; }
+  void setAddrTaken(bool taken) { addrTaken = taken; }
+
 private:
   Kind kind;
   CountedPtr<Type> type;
   SSASymbolId id = 0;
+  bool addrTaken = false;
 };
 
 class Scope {
@@ -47,8 +51,24 @@ private:
 class SymbolTable {
 public:
   using IdentId = Scope::IdentId;
+
+  class ScopeHandle {
+  public:
+    ScopeHandle(SymbolTable &sym) : sym(&sym) {}
+    ScopeHandle(const ScopeHandle &) = delete;
+    ScopeHandle &operator=(const ScopeHandle &) = delete;
+    ~ScopeHandle() {
+      if (sym) {
+        sym->popScope();
+      }
+    }
+
+  private:
+    SymbolTable *sym;
+  };
+
   SymbolTable() {}
-  void pushScope(Scope::Kind kind) { scopes.emplace_back(kind); }
+  void pushScope(Scope &scope) { scopes.push_back(&scope); }
 
   void popScope() {
     assert(scopes.size() > 0);
@@ -57,13 +77,15 @@ public:
 
   Scope &scope() {
     assert(scopes.size() > 0);
-    return scopes.back();
+    return *scopes.back();
   }
 
   Scope &scope(unsigned n) {
     assert(n < scopes.size());
-    return scopes[n];
+    return *scopes[n];
   }
+
+  void clearScopeStack() { scopes.clear(); }
 
   Symbol *declareSymbol(std::string_view name, Symbol symbol) {
     symbol.id = nextSymId;
@@ -88,7 +110,7 @@ public:
     if (idIt == identIdMap.end())
       return nullptr;
     for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-      auto *sym = it->getSymbol(idIt->second);
+      auto *sym = (*it)->getSymbol(idIt->second);
       if (sym)
         return sym;
     }
@@ -96,7 +118,7 @@ public:
   }
 
 private:
-  std::vector<Scope> scopes;
+  std::vector<Scope *> scopes;
   std::unordered_map<std::string_view, IdentId> identIdMap;
   IdentId nextIdentId = 1;
   SSASymbolId nextSymId = 1;

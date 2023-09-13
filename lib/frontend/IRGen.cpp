@@ -5,6 +5,7 @@
 #include "frontend/Symbol.h"
 #include "frontend/Type.h"
 #include "ir/IR.h"
+#include "ir/IRBuilder.h"
 #include "ir/InstrBuilder.h"
 #include "ir/LazySSABuilder.h"
 #include <cassert>
@@ -20,6 +21,7 @@ namespace {
 class StorageBuilder {
 
 public:
+  StorageBuilder(IRBuilder &ir) : ir(ir) {}
   enum StorageKind {
     EMPTY,
     SSA,
@@ -29,12 +31,10 @@ public:
   class StorageInfo {
   public:
     StorageInfo(Symbol &symbol) : symbol(&symbol) {}
-    // FIXME: symbol becomes dangling when symbol table scope ends
     Symbol *symbol;
     StorageKind kind = EMPTY;
     Operand *ptr = nullptr;
     std::vector<Operand *> ssaDefs;
-    std::vector<Operand *> ssaUsedDefs;
   };
 
   static SSAType &memType(Type &type) {
@@ -68,18 +68,11 @@ public:
   }
 
   void allocateStack(StorageInfo &s) {
+    assert(s.kind == EMPTY);
     SSAType &ssaType = memType(*s.symbol->getType());
-    Operand &ptr =
-        InstrBuilder(currFunc->getEntry().getSentryBegin().getNextNode())
-            .emitAlloca(ssaType, 1)
-            .getDef();
+    Operand &ptr = ir->emitAlloca(ssaType, 1).getDef();
     s.kind = STACK;
     s.ptr = &ptr;
-  }
-
-  void setFunction(Function &func) {
-    slots.clear();
-    currFunc = &func;
   }
 
   void allocateSSA(StorageInfo &s) {
@@ -88,29 +81,14 @@ public:
     s.ptr = nullptr;
   }
 
+  void setFunction(Function &func) {
+    slots.clear();
+    currFunc = &func;
+  }
+
   void trackSSADef(StorageInfo &s, Operand &operand) {
     assert(s.kind == SSA);
     s.ssaDefs.push_back(&operand);
-  }
-  void trackSSAUsedDef(StorageInfo &s, Operand &operand) {
-    assert(s.kind == SSA);
-    s.ssaUsedDefs.push_back(&operand);
-  }
-
-  void downgradeSSAToStack(StorageInfo &s) {
-    assert(s.kind == SSA);
-    allocateStack(s);
-    for (auto *op : s.ssaUsedDefs) {
-      for (auto &use : op->ssaDef()) {
-        auto b = InstrBuilder(use.getParent());
-        b.emitLoad(s.ptr->getParent().getOperand(1).type(), *s.ptr);
-        use.ssaUseReplace(b.getDef());
-      }
-    }
-    for (auto *op : s.ssaDefs) {
-      auto b = InstrBuilder(op->getParent().getNextNode());
-      b.emitStore(*s.ptr, *op);
-    }
   }
 
   StorageInfo &get(SSASymbolId id) {
@@ -121,16 +99,17 @@ public:
 
 private:
   Function *currFunc;
+  IRBuilder &ir;
   std::unordered_map<SSASymbolId, StorageInfo> slots;
 };
 
 class IRGenASTVisitor : public ASTVisitor<IRGenASTVisitor>,
                         public ExpressionSemantics::Handler {
 public:
-  IRGenASTVisitor() : sema(*this) {}
+  IRGenASTVisitor(SymbolTable &sym) : sym(sym), sema(*this), storage(ir) {}
 
   void visitTranslationUnit(TranslationUnitAST &ast) {
-    sym.pushScope(Scope::FILE);
+    sym.pushScope(ast.scope);
     for (auto &d : ast.declarations) {
       dispatch(d.get());
     }
@@ -138,26 +117,23 @@ public:
   }
 
   void visitFunctionDefinition(FunctionDefinitionAST &ast) {
-    ssa.startFunction();
-    storage.setFunction(ssa.getFunc());
-    ssa.startBlock();
-    sym.declareSymbol(ast.decl.ident,
-                      Symbol(Symbol::EXTERN, std::move(ast.decl.type)));
-    sym.pushScope(Scope::FUNC);
-    sym.pushScope(Scope::BLOCK);
+    ir.startFunction();
+    storage.setFunction(ir.getFunc());
+    ir.startBlock();
+    sym.pushScope(ast.funcScope);
+    sym.pushScope(ast.blockScope);
     /*
     for (auto [name, idx] : ast.getType().getParamIndex()) {
       sym.declareSymbol(name,
                         Symbol(Symbol::AUTO, ast.getType().getParamType(idx)));
     }
     */
-    for (auto &child : ast.getStatement().children) {
-      dispatch(child.get());
-    }
+    dispatch(ast.getStatement());
     sym.popScope();
     sym.popScope();
-    ssa.endBlock();
-    ssa.endFunction();
+    ir.endBlock();
+    SSARenumberTable::destroy(ir.getFunc());
+    ir.endFunction();
   }
 
   void visitDeclaration(DeclarationAST &ast) {
@@ -165,18 +141,20 @@ public:
       assert(false && "Global declaration unsupported");
     } else if (sym.scope().isBlock()) {
       for (auto &d : ast.declarators) {
-        auto *s =
-            sym.declareSymbol(d.ident, Symbol(Symbol::AUTO, std::move(d.type)));
-        if (!s) {
-          error("Symbol redeclared");
+        auto *s = sym.getSymbol(d.ident);
+        assert(s && "Symbol undeclared");
+        auto &sInfo = storage.declareLocal(*s);
+        if (s->isAddrTaken()) {
+          storage.allocateStack(sInfo);
+        } else {
+          storage.allocateSSA(sInfo);
         }
-        storage.allocateSSA(storage.declareLocal(*s));
       }
     }
   }
 
   void visitCompoundSt(CompoundStAST &ast) {
-    sym.pushScope(Scope::BLOCK);
+    sym.pushScope(ast.scope);
     for (auto &child : ast.children) {
       dispatch(child.get());
     }
@@ -186,8 +164,8 @@ public:
   void visit(AST &) {}
 
   void visitNum(NumAST &ast) {
-    ssa->emitConstInt(IntSSAType::get(32), ast.num);
-    tmpOperand = &ssa.getDef();
+    ir->emitConstInt(IntSSAType::get(32), ast.num);
+    tmpOperand = &ir.getDef();
     sema.fromConstant(BasicType::create(Type::SINT));
   }
 
@@ -197,16 +175,14 @@ public:
       error("Symbol undeclared");
     }
     sema.fromSymbol(*tmpSymbol);
+    auto &s = storage.get(tmpSymbol->getId());
+    tmpOperand = s.ptr;
   }
 
   void visitUnop(UnopAST &ast) {
     switch (ast.getKind()) {
     case AST::ADDR: {
       dispatch(ast.getSubExpression());
-      if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
-        auto &s = storage.get(tmpSymbol->getId());
-        tmpOperand = s.ptr;
-      }
       sema.addr();
       break;
     }
@@ -228,10 +204,7 @@ public:
       sema.expectRValue();
       Operand *rhs = tmpOperand;
       dispatch(ast.getLHS());
-      sema.expectLValue();
-      // TODO: mem store
-      ssa.storeSSA(tmpSymbol->getId(), *rhs);
-      storage.trackSSADef(storage.get(tmpSymbol->getId()), *tmpOperand);
+      store(*rhs);
       sema.setCategory(ExpressionSemantics::RVALUE);
       break;
     }
@@ -241,8 +214,19 @@ public:
       Operand *lhs = tmpOperand;
       dispatch(ast.getRHS());
       sema.expectRValue();
-      ssa->emitAdd(*lhs, *tmpOperand);
-      tmpOperand = &ssa.getDef();
+      ir->emitAdd(*lhs, *tmpOperand);
+      tmpOperand = &ir.getDef();
+      sema.setCategory(ExpressionSemantics::RVALUE);
+      break;
+    }
+    case AST::EQ: {
+      dispatch(ast.getLHS());
+      sema.expectRValue();
+      Operand *lhs = tmpOperand;
+      dispatch(ast.getRHS());
+      sema.expectRValue();
+      ir->emitCmp(BrCond::eq(), *lhs, *tmpOperand);
+      tmpOperand = &ir.getDef();
       sema.setCategory(ExpressionSemantics::RVALUE);
       break;
     }
@@ -253,23 +237,38 @@ public:
   }
 
   void visitIfSt(IfStAST &ast) {
-    Block &src = ssa.endBlock();
+    dispatch(ast.getExpression());
+    sema.expectRValue();
+    sema.expectTypeKind(Type::BOOL);
+    Operand &condExpr = *tmpOperand;
+    Block &src = ir.endBlock();
 
-    ssa.startBlock();
-    Block &dstTrue = ssa.endBlock();
-
+    ir.startBlock();
     dispatch(ast.getStatement());
+    Block &dstTrue = ir.endBlock();
 
+    Block *dstFalse = nullptr;
     if (ast.hasElseStatement()) {
-      ssa.startBlock();
+      dstFalse = &ir.startBlock();
       dispatch(ast.getElseStatement());
-      Block &dstFalse = ssa.endBlock();
+      ir.endBlock();
     }
 
-    ssa.startBlock();
+    Block &dst = ir.startBlock();
+    ir.setBlock(dstTrue);
+    ir->emitBr(dst);
+    if (dstFalse) {
+      ir.setBlock(dstFalse);
+      ir->emitBr(dst);
+    } else {
+      dstFalse = &dst;
+    }
+    ir.setBlock(src);
+    ir->emitBrCond(condExpr, dstTrue, *dstFalse);
+    ir.setBlock(dst);
   }
+
   void visitWhileSt(WhileStAST &ast) {}
-  void visitDeclarator(DeclaratorAST &ast) {}
 
   void error(std::string_view err) {
     std::cerr << "[IRGen] " << err << "\n";
@@ -277,33 +276,39 @@ public:
     exit(1);
   }
 
+  void store(Operand &operand) {
+    sema.expectLValue();
+    if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
+      auto &s = storage.get(tmpSymbol->getId());
+      if (s.kind == StorageBuilder::SSA) {
+        SSABuilder::store(tmpSymbol->getId(), operand, ir.getBlock());
+        storage.trackSSADef(s, *tmpOperand);
+        return;
+      }
+    }
+    ir->emitStore(*tmpOperand, operand);
+  }
+
   ExpressionSemantics::Result semanticConvLValue() {
     if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
       auto &s = storage.get(tmpSymbol->getId());
       if (s.kind == StorageBuilder::SSA) {
-        tmpOperand = ssa.loadSSA(tmpSymbol->getId());
-        if (!tmpOperand) {
-          return ExpressionSemantics::ERROR;
-        }
-        storage.trackSSAUsedDef(s, *tmpOperand);
-      } else if (s.kind == StorageBuilder::STACK) {
-        ssa->emitLoad(StorageBuilder::memType(*sema.getType()), *s.ptr);
-        tmpOperand = &ssa.getDef();
+        tmpOperand = SSABuilder::load(tmpSymbol->getId(), ir.getBlock());
+        assert(tmpOperand);
+        return ExpressionSemantics::SUCCESS;
       }
-      return ExpressionSemantics::SUCCESS;
-    } else if (sema.getCategory() == ExpressionSemantics::LVALUE_MEM) {
-      ssa->emitLoad(StorageBuilder::memType(*sema.getType()), *tmpOperand);
-      tmpOperand = &ssa.getDef();
-      return ExpressionSemantics::SUCCESS;
     }
-    return ExpressionSemantics::ERROR;
+
+    ir->emitLoad(StorageBuilder::memType(*sema.getType()), *tmpOperand);
+    tmpOperand = &ir.getDef();
+    return ExpressionSemantics::SUCCESS;
   }
 
-  ExpressionSemantics::Result semanticSSADowngrade() {
-    auto &s = storage.get(tmpSymbol->getId());
-    if (s.kind == StorageBuilder::SSA) {
-      storage.downgradeSSAToStack(s);
-    }
+  ExpressionSemantics::Result semanticConvBool() {
+    assert(tmpOperand->ssaDefType().getKind() == SSAType::INT);
+    ir->emitConstInt(static_cast<IntSSAType &>(tmpOperand->ssaDefType()), 0);
+    ir->emitCmp(BrCond::ne(), *tmpOperand, ir.getDef());
+    tmpOperand = &ir.getDef();
     return ExpressionSemantics::SUCCESS;
   }
 
@@ -313,17 +318,17 @@ public:
 
   Operand *tmpOperand = nullptr;
   Symbol *tmpSymbol = nullptr;
-  StorageBuilder storage;
-
+  IRBuilder ir;
   SymbolTable sym;
-  SSABuilder ssa;
   ExpressionSemantics sema;
+  StorageBuilder storage;
 };
 } // namespace
 
-std::unique_ptr<Program> IRGenAST(AST &ast) {
-  auto gen = IRGenASTVisitor();
-  gen.ssa.startProgram();
+std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, SymbolTable &sym) {
+  auto gen = IRGenASTVisitor(sym);
+  sym.clearScopeStack();
+  gen.ir.startProgram();
   gen.dispatch(ast);
-  return gen.ssa.endProgram();
+  return gen.ir.endProgram();
 }

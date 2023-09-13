@@ -45,6 +45,12 @@ public:
     case AST::RSHIFT:
     case AST::LOG_AND:
     case AST::LOG_OR:
+    case AST::EQ:
+    case AST::NEQ:
+    case AST::LT:
+    case AST::GT:
+    case AST::LTE:
+    case AST::GTE:
       VISIT_DELEGATE(Binop);
       break;
     case AST::INC_PRE:

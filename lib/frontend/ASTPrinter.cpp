@@ -41,10 +41,10 @@ public:
   void visitIfSt(IfStAST &ast) {
     std::cout << "if(";
     dispatch(ast.getExpression());
-    std::cout << ")\n";
+    std::cout << ")";
     dispatch(ast.getStatement());
     if (ast.hasElseStatement()) {
-      std::cout << "\nelse\n";
+      std::cout << "\nelse";
       dispatch(ast.getElseStatement());
     }
   }
@@ -52,7 +52,7 @@ public:
   void visitWhileSt(WhileStAST &ast) {
     std::cout << "while(";
     dispatch(ast.getExpression());
-    std::cout << ")\n";
+    std::cout << ")";
     dispatch(ast.getStatement());
   }
 
