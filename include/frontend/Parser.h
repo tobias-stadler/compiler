@@ -8,7 +8,9 @@
 
 class Parser {
 public:
-  Parser(Lexer &lex, SymbolTable &sym) : lex(&lex), sym(&sym) {}
+  Parser(Lexer &lex, SymbolTable &sym) : lex(&lex), sym(&sym) {
+    sym.clearScopeStack();
+  }
 
 public:
   ASTPtrResult parseLiteralNum();
@@ -124,7 +126,7 @@ public:
         } else if (keys[Token::KEYWORD_REGISTER] == 1) {
           storageKind = Symbol::REGISTER;
         } else {
-          return error("Invalid storage specifier ");
+          return error("Invalid storage specifier");
         }
       } else {
         return error("Multiple storage specifiers not allowed");

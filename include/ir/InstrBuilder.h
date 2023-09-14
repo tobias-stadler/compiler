@@ -23,18 +23,25 @@ public:
     assert(instr->getKind() == Instr::INSTR_PHI);
   }
 
-  void setupOperands(unsigned numPred) {
-    instr->allocateOperands(1 + 2 * numPred);
-    instr->emplaceOperand<Operand::SSA_DEF_TYPE>(VoidSSAType::get());
+  void setupPredecessors(unsigned numPreds) {
+    instr->getChainOperand().chain().allocate(2 * numPreds);
   }
 
-  void setType(SSAType &type) { instr->getDef().ssaDefSetType(type); }
+  unsigned getNumPredecessors() {
+    return instr->getChainOperand().chain().getCapacity() / 2;
+  }
 
-  void addPred(Operand &def, Block &pred) {
+  bool isComplete() { return instr->getChainOperand().chain().isAllocated(); }
+
+  void addPredecessor(Operand &def, Block &pred) {
     assert(def.ssaDefType() == instr->getDef().ssaDefType());
-    instr->emplaceOperand<Operand::SSA_USE>(def);
-    instr->emplaceOperand<Operand::BLOCK>(&pred);
+    OperandChain &chain = instr->getChainOperand().chain();
+    chain.getOperand(nextOperand++).emplace<Operand::SSA_USE>(instr, def);
+    chain.getOperand(nextOperand++).emplace<Operand::BLOCK>(instr, &pred);
   }
+
+private:
+  unsigned nextOperand = 0;
 };
 
 class AllocaInstrPtr : public InstrPtr {
@@ -76,7 +83,8 @@ public:
     lastInstr = instr;
   }
 
-  Instr &emitConstInt(IntSSAType &type, int32_t val) {
+  Instr &emitConstInt(SSAType &type, int32_t val) {
+    // TODO: assert that type can construct constant
     Instr *i = new Instr(Instr::CONST_INT);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
@@ -96,8 +104,10 @@ public:
     return *i;
   }
 
-  PhiInstrPtr buildPhi() {
+  PhiInstrPtr buildPhi(SSAType &type) {
     Instr *i = new Instr(Instr::INSTR_PHI);
+    i->allocateVariadicOperands(1);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     return i;
   }
 
@@ -209,6 +219,17 @@ public:
     i->emplaceOperand<Operand::SSA_USE>(dst.getDef());
     emit(i);
     return *i;
+  }
+
+  Instr &emitNot(Operand &val) {
+    // TODO: arbitrary int
+    Instr &i = emitConstInt(IntSSAType::get(1), 1);
+    return emitXor(val, i.getDef());
+  }
+
+  Instr &emitNeg(Operand &val) {
+    Instr &i = emitConstInt(val.ssaDefType(), 0);
+    return emitSub(i.getDef(), val);
   }
 
   Instr &emitBrCond(Operand &cond, Block &dstTrue, Block &dstFalse) {

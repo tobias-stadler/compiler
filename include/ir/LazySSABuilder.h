@@ -28,12 +28,6 @@ public:
     set(id, *def);
   }
 
-  void setMarked(bool val) { marked = val; }
-  void setSealed(bool val) { sealed = val; }
-
-  bool isMarked() { return marked; }
-  bool isSealed() { return sealed; }
-
   static void init(Block &block) {
     assert(!block.userData);
     block.userData = new SSARenumberTable();
@@ -56,36 +50,42 @@ public:
     return *static_cast<SSARenumberTable *>(b.userData);
   }
 
-private:
   std::unordered_map<SSASymbolId, Operand *> symbols;
+  std::vector<std::pair<Instr *, SSASymbolId>> incompletePhis;
   bool marked = false;
-  bool sealed = true;
+  bool sealed = false;
 };
 
 class SSABuilder {
 public:
-  static Operand *load(SSASymbolId id, Block &block) {
+  static Operand *load(SSASymbolId id, SSAType &type, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
-    SSADef &blockSSADef = block.getDef().ssaDef();
-
     Operand *def = renum.get(id);
     if (def) {
+      assert(def->ssaDefType() == type);
       return def;
     }
-
-    if (!renum.isSealed()) {
-      assert(false && "Not sealed");
+    if (!renum.sealed) {
+      auto phi = InstrBuilder().buildPhi(type);
+      block.insertBegin(phi.get());
+      def = &phi->getDef();
+      renum.set(id, def);
+      renum.incompletePhis.emplace_back(phi.get(), id);
+      return def;
     }
-    unsigned numPreds = blockSSADef.getNumUses();
+    unsigned numPreds = block.getNumPredecessors();
     if (numPreds == 0) {
       return nullptr;
     }
     if (numPreds == 1) {
-      def = load(id, blockSSADef.begin()->getParentBlock());
+      def = load(id, type, block.getDef().ssaDef().begin()->getParentBlock());
+      if (!def)
+        return nullptr;
+      assert(def->ssaDefType() == type);
       renum.set(id, def);
       return def;
     }
-    if (renum.isMarked()) {
+    if (renum.marked) {
       /*
       auto phi = InstrBuilder().emitPhi();
       phi.setupOperands(numPreds);
@@ -95,30 +95,40 @@ public:
       return def;
       */
       assert(false && "Endless recursion");
-    } else {
-      renum.setMarked(true);
-      auto phi = InstrBuilder().buildPhi();
-      phi.setupOperands(numPreds);
-      block.insertBegin(phi.get());
-      def = &phi->getDef();
-      renum.set(id, *def);
-      for (auto &pred : blockSSADef) {
-        Block &predBlock = pred.getParentBlock();
-        Operand *predDef = load(id, predBlock);
-        assert(predDef);
-        if (predDef->ssaDefType() != VoidSSAType::get()) {
-          phi.setType(predDef->ssaDefType());
-        }
-        phi.addPred(*predDef, predBlock);
-      }
-      assert(phi->getDef().ssaDefType() != VoidSSAType::get());
-      renum.setMarked(false);
+      return nullptr;
     }
+    renum.marked = true;
+    auto phi = InstrBuilder().buildPhi(type);
+    block.insertBegin(phi.get());
+    def = &phi->getDef();
+    renum.set(id, def);
+    populatePhi(phi, id);
+    renum.marked = false;
     return def;
   }
 
   static void store(SSASymbolId id, Operand &def, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     renum.set(id, def);
+  }
+
+  static void sealBlock(Block &block) {
+    auto &renum = SSARenumberTable::getTable(block);
+    assert(!renum.sealed);
+    renum.sealed = true;
+    for (auto [instr, id] : renum.incompletePhis) {
+      populatePhi(PhiInstrPtr(instr), id);
+    }
+  }
+
+private:
+  static void populatePhi(PhiInstrPtr phi, SSASymbolId id) {
+    phi.setupPredecessors(phi->getParent().getNumPredecessors());
+    for (auto &use : phi->getParent().getDef().ssaDef()) {
+      Block &predBlock = use.getParentBlock();
+      Operand *predDef = load(id, phi->getDef().ssaDefType(), predBlock);
+      assert(predDef);
+      phi.addPredecessor(*predDef, predBlock);
+    }
   }
 };

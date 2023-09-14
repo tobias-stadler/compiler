@@ -43,10 +43,20 @@ void SSAUse::unlink() {
 }
 
 void SSADef::replaceAllUses(Operand &newDef) {
-  newDef.ssaDef().chNext = chNext;
-  for (Operand *use = chNext; use; use = use->ssaUse().chNext) {
-    use->ssaUse().def = &newDef;
+  if (!chNext) {
+    return;
   }
+  Operand *lastUseOp = nullptr;
+  for (Operand *useOp = chNext; useOp; useOp = useOp->ssaUse().chNext) {
+    useOp->ssaUse().def = &newDef;
+    lastUseOp = useOp;
+  }
+  Operand *newDefFirstUse = newDef.ssaDef().chNext;
+  if (newDefFirstUse) {
+    lastUseOp->ssaUse().chNext = newDefFirstUse;
+    newDefFirstUse->ssaUse().chPrev = lastUseOp;
+  }
+  newDef.ssaDef().chNext = chNext;
   chNext = nullptr;
 }
 
@@ -78,3 +88,11 @@ void OperandChain::deallocate() {
   delete[] operands;
   capacity = 0;
 }
+Operand &OperandChain::getOperand(unsigned n) {
+  assert(n < capacity);
+  return operands[n];
+}
+OperandChain::iterator OperandChain::begin() { return operands; }
+
+OperandChain::iterator OperandChain::end() { return operands + capacity; }
+

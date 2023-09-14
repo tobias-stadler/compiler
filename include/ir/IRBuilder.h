@@ -12,20 +12,11 @@ public:
     return *program;
   }
 
-  Function &startFunction() {
-    assert(!currFunc);
+  Function &createAndSetFunction() {
     auto func = std::make_unique<Function>();
     currFunc = func.get();
     program->addFunction(std::move(func));
     return *currFunc;
-  }
-
-  Function &endFunction() {
-    assert(currFunc);
-    assert(!currBlock);
-    Function &func = *currFunc;
-    currFunc = nullptr;
-    return func;
   }
 
   void setBlock(Block &block) { setBlock(&block); }
@@ -40,20 +31,17 @@ public:
     currBlock = block;
   }
 
-  Block &startBlock() {
+  Block &createBlock() {
     assert(currFunc);
-    assert(!currBlock);
-    currBlock = new Block();
-    currFunc->insertEnd(currBlock);
-    setBlock(*currBlock);
-    return *currBlock;
+    Block *b = new Block();
+    currFunc->insertEnd(b);
+    return *b;
   }
 
-  Block &endBlock() {
-    assert(currBlock);
-    Block &block = *currBlock;
-    setBlock(nullptr);
-    return block;
+  Block &createAndSetBlock() {
+    assert(!currBlock);
+    setBlock(createBlock());
+    return *currBlock;
   }
 
   Block &getBlock() {

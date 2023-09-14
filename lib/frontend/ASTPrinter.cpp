@@ -63,12 +63,16 @@ public:
 
   void visitDeclaration(DeclarationAST &ast) {
     bool first = true;
-    for (auto &d : ast.declarators) {
+    for (auto &[d, initializer] : ast.declarators) {
       if (!first) {
         std::cout << ",\n";
       }
       first = false;
       dispatch(d);
+      if (initializer) {
+        std::cout << " = ";
+        dispatch(initializer.get());
+      }
     }
   }
 

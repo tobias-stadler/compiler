@@ -9,12 +9,6 @@
 
 class ExpressionSemantics {
 public:
-  enum Action {
-    CONV_LVALUE,
-    CONV_BOOL,
-    CONV_INT,
-  };
-
   enum Result {
     SUCCESS,
     ERROR,
@@ -50,12 +44,16 @@ public:
   }
 
   static constexpr Type::Kind intPromotion(Type::Kind kind) {
-    if (intConvRank(kind) > intConvRank(Type::SINT)) {
+    unsigned kindRank = intConvRank(kind);
+    if (kindRank == 0) {
+      return Type::EMPTY;
+    }
+    if (kindRank > intConvRank(Type::SINT)) {
       return kind;
     }
     switch (kind) {
     default:
-      return kind;
+      __builtin_unreachable();
     case Type::BOOL:
     case Type::SCHAR:
     case Type::UCHAR:
@@ -101,17 +99,6 @@ public:
 
   class Handler {
   public:
-    Result tryAction(Action action) {
-      switch (action) {
-      case CONV_LVALUE:
-        return semanticConvLValue();
-      case CONV_BOOL:
-        return semanticConvBool();
-      default:
-        return ERROR;
-      }
-    }
-
     virtual Result semanticConvLValue() = 0;
     virtual Result semanticConvBool() = 0;
     virtual Result semanticConvInt(Type::Kind expectedKind) = 0;
@@ -155,13 +142,6 @@ public:
   }
   bool isRValue() { return category == RVALUE; }
 
-  void tryAction(Action action) {
-    auto res = handler->tryAction(action);
-    if (res != SUCCESS) {
-      error(res);
-    }
-  }
-
   void error(Result err) { handler->semanticError(err); }
 
   void expectLValue() {
@@ -174,8 +154,7 @@ public:
     if (category == RVALUE) {
       return;
     }
-    if (isLValue()) {
-      tryAction(CONV_LVALUE);
+    if (isLValue() && handler->semanticConvLValue() == SUCCESS) {
       category = RVALUE;
       return;
     }

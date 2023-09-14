@@ -7,6 +7,7 @@
 #include <charconv>
 #include <frontend/Parser.h>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -436,15 +437,26 @@ ASTPtrResult Parser::parseDeclaration() {
   }
 
   auto ast = std::make_unique<DeclarationAST>();
-  ast->declarators.push_back(decl.moveRes());
-  while (lex->matchNextToken(Token::PUNCT_COMMA)) {
-    auto decl = parseDeclarator(false);
+  while (true) {
+    AST::Ptr initializer = nullptr;
+    if (lex->matchNextToken(Token::PUNCT_EQ)) {
+      auto expr = parseExpression();
+      if (!expr) {
+        return error("Expected valid expression as initializer");
+      }
+      initializer = expr.moveRes();
+    }
+    ast->declarators.emplace_back(decl.moveRes(), std::move(initializer));
+    if (!lex->matchNextToken(Token::PUNCT_COMMA)) {
+      break;
+    }
+    decl = parseDeclarator(false);
     if (!decl) {
       return error("Expected valid declarator");
     }
     decl->spliceEnd(DeclaratorAST(type, nullptr));
-    ast->declarators.push_back(std::move(*decl));
   }
+
   if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
     return error("Expected semicolon after declaration");
   }
@@ -453,11 +465,11 @@ ASTPtrResult Parser::parseDeclaration() {
     // TODO: global variable declaration in symbol table
     assert(false && "global variable declaration unsupported");
   } else {
-    for (auto &d : ast->declarators) {
+    for (auto &[d, _] : ast->declarators) {
       // TOOD: proper handling of storage spec
       auto *s = sym->declareSymbol(d.ident, Symbol(Symbol::AUTO, d.type));
       if (!s) {
-        return error("Symbol redeclared");
+        return error(std::string("Symbol redeclared: ") + std::string(d.ident));
       }
     }
   }

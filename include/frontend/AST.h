@@ -275,7 +275,7 @@ public:
   DeclarationAST() : AST(DECLARATION) {}
 
   DeclSpec spec;
-  std::vector<DeclaratorAST> declarators;
+  std::vector<std::pair<DeclaratorAST, Ptr>> declarators;
 };
 
 class FunctionDefinitionAST : public AST {

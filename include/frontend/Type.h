@@ -86,6 +86,8 @@ public:
 
   static SSAType &irType(Type::Kind kind) {
     switch (kind) {
+    case Type::BOOL:
+      return IntSSAType::get(1);
     case Type::SCHAR:
     case Type::UCHAR:
       return IntSSAType::get(8);

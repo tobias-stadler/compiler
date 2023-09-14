@@ -185,9 +185,12 @@ class SSADef {
 
 public:
   SSADef(SSAType &type) : contentType(&type) {}
+  SSADef(SSAType *type) : contentType(type) {}
   SSADef(unsigned regClass) : contentRegClass(regClass) {}
   SSADef(Block &block) : contentBlock(&block) {}
+  SSADef(Block *block) : contentBlock(block) {}
   SSADef(Function &func) : contentFunction(&func) {}
+  SSADef(Function *func) : contentFunction(func) {}
 
   SSADef(const SSADef &o) = delete;
   SSADef &operator=(const SSADef &o) = delete;
@@ -253,8 +256,15 @@ public:
   OperandChain &operator=(const OperandChain &o) = delete;
   ~OperandChain() { deallocate(); }
 
+  using iterator = Operand *;
+  iterator begin();
+  iterator end();
+
   void allocate(unsigned cap);
   void deallocate();
+  Operand &getOperand(unsigned n);
+  unsigned getCapacity() { return capacity; }
+  bool isAllocated() { return operands; }
 
 private:
   unsigned capacity = 0;
@@ -272,44 +282,93 @@ public:
     SSA_DEF_BLOCK,
     SSA_DEF_FUNCTION,
     SSA_USE,
-    DEF_REG,
-    USE_REG,
+    REG_DEF,
+    REG_USE,
     BLOCK,
     TYPE,
     IMM32,
     BRCOND,
     CHAIN,
   };
-  Operand() {}
-  Operand(const Operand &o) = delete;
-  Operand &operator=(const Operand &o) = delete;
-  ~Operand() { destroy(); }
-
-  static constexpr bool kindIsSSA(Kind kind) {
+  static constexpr bool kindIsSSADef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
     case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
-    case SSA_USE:
       return true;
     default:
       return false;
     }
   }
-
   static constexpr bool kindIsDef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
     case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
-    case DEF_REG:
+    case REG_DEF:
       return true;
     default:
       return false;
     }
   }
+
+  Operand() {}
+  Operand(const Operand &o) = delete;
+  Operand &operator=(const Operand &o) = delete;
+  Operand(Operand &&o) = delete;
+  Operand &operator=(Operand &o) noexcept {
+    destroy();
+    switch (kind) {
+    case EMPTY:
+      break;
+    case SSA_DEF_TYPE:
+      emplace<SSA_DEF_TYPE>(o.parent, o.ssaDef().contentType);
+      o.ssaDef().replaceAllUses(*this);
+      break;
+    case SSA_DEF_REGCLASS:
+      emplace<SSA_DEF_REGCLASS>(o.parent, o.ssaDef().contentRegClass);
+      o.ssaDef().replaceAllUses(*this);
+      break;
+    case SSA_DEF_BLOCK:
+      emplace<SSA_DEF_BLOCK>(o.parent, o.ssaDef().contentBlock);
+      o.ssaDef().replaceAllUses(*this);
+      break;
+    case SSA_DEF_FUNCTION:
+      emplace<SSA_DEF_FUNCTION>(o.parent, o.ssaDef().contentFunction);
+      o.ssaDef().replaceAllUses(*this);
+      break;
+    case SSA_USE:
+      if (o.ssaUse().def) {
+        emplace<SSA_USE>(o.parent, o.ssaUse().getDef());
+      }
+      break;
+    case REG_DEF:
+      emplace<REG_DEF>(o.parent, o.contentReg);
+      break;
+    case REG_USE:
+      emplace<REG_USE>(o.parent, o.contentReg);
+      break;
+    case BLOCK:
+      emplace<BLOCK>(o.parent, o.contentBlock);
+      break;
+    case TYPE:
+      emplace<TYPE>(o.parent, o.contentType);
+      break;
+    case IMM32:
+      emplace<IMM32>(o.parent, o.contentImm32);
+      break;
+    case BRCOND:
+      emplace<BRCOND>(o.parent, o.contentBrCond);
+      break;
+    case CHAIN:
+      assert(false && "Don't move chain!");
+      break;
+    }
+    return *this;
+  }
+  ~Operand() { destroy(); }
 
   Kind getKind() { return kind; }
 
@@ -337,10 +396,14 @@ public:
   template <Kind K, typename... ARGS>
   void emplace(Instr *parent, ARGS &&...args) {
     destroy();
-    if constexpr (kindIsDef(K) && kindIsSSA(K)) {
+    if constexpr (kindIsSSADef(K)) {
       new (&contentDef) SSADef(std::forward<ARGS>(args)...);
     } else if constexpr (K == SSA_USE) {
       new (&contentUse) SSAUse(std::forward<ARGS>(args)...);
+    } else if constexpr (K == REG_DEF) {
+      new (&contentReg) unsigned(std::forward<ARGS>(args)...);
+    } else if constexpr (K == REG_USE) {
+      new (&contentReg) unsigned(std::forward<ARGS>(args)...);
     } else if constexpr (K == IMM32) {
       new (&contentImm32) int32_t(std::forward<ARGS>(args)...);
     } else if constexpr (K == BRCOND) {
@@ -366,7 +429,7 @@ public:
   }
 
   SSADef &ssaDef() {
-    assert(kindIsSSA(kind) && kindIsDef(kind));
+    assert(kindIsSSADef(kind));
     return contentDef;
   }
   SSAType &ssaDefType() {
@@ -484,6 +547,8 @@ public:
     return *begin();
   }
 
+  Operand &getDef() { return funcDef; }
+
 private:
   Operand funcDef;
 };
@@ -494,6 +559,8 @@ public:
   Block() { blockDef.emplace<Operand::SSA_DEF_BLOCK>(nullptr, *this); }
 
   Operand &getDef() { return blockDef; }
+
+  unsigned getNumPredecessors() { return blockDef.ssaDef().getNumUses(); }
 
   void *userData = nullptr;
 
@@ -607,7 +674,7 @@ public:
   using iterator = Operand *;
 
   iterator begin() { return operands; }
-  iterator end() { return operands + getNumOperands(); }
+  iterator end() { return operands + capacity; }
 
   Instr(unsigned kind) : kind(kind) {}
   Instr(const Instr &o) = delete;
@@ -632,18 +699,18 @@ public:
     delete[] operands;
     operands = nullptr;
     capacity = 0;
+    numDefs = 0;
+    numOther = 0;
   }
 
   void allocateOperands(unsigned cap) {
     assert(cap > 0);
-    deleteOperands();
     operands = new Operand[cap];
     capacity = cap;
   }
 
   void allocateVariadicOperands(unsigned cap) {
     assert(cap > 0);
-    deleteOperands();
     capacity = cap + 1;
     operands = new Operand[capacity];
     operands[cap].emplace<Operand::CHAIN>(this);
@@ -662,6 +729,11 @@ public:
   Operand &getOperandUnchecked(unsigned n) {
     assert(n < capacity);
     return operands[n];
+  }
+
+  Operand &getChainOperand() {
+    assert(isVariadic());
+    return operands[capacity - 1];
   }
 
   template <Operand::Kind K, typename... ARGS>

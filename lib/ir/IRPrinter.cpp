@@ -95,35 +95,52 @@ public:
       std::cout << op.ssaDefRegClass() << ")";
       break;
     case Operand::SSA_USE:
+      printNumberedDef(op.ssaUse().getDef());
+      break;
     case Operand::SSA_DEF_BLOCK:
     case Operand::SSA_DEF_FUNCTION:
-    case Operand::DEF_REG:
-    case Operand::USE_REG:
-    case Operand::BLOCK:
-    case Operand::TYPE:
-    case Operand::CHAIN:
+    case Operand::REG_USE:
+    case Operand::REG_DEF:
       std::cout << "unnamed";
       break;
+    case Operand::TYPE:
+      printSSAType(op.type());
+      break;
+    case Operand::BLOCK:
+      printNumberedDef(op.block().getDef());
+      break;
+    case Operand::CHAIN: {
+      bool first = true;
+      std::cout << "[";
+      for (auto &o : op.chain()) {
+        if (first) {
+          first = false;
+        } else {
+          std::cout << " ";
+        }
+        dispatch(o);
+      }
+      std::cout << "]";
+      break;
+    }
     case Operand::BRCOND:
       std::cout << BrCond::kindName(op.brCond().getKind());
       break;
     }
   }
 
-  void visitOperandSSAUse(Operand &op) {
-    Operand &def = op.ssaUse().getDef();
-    if (auto n = numbering.getNum(def)) {
+  void printNumberedDef(Operand &op) {
+    if (auto n = numbering.getNum(op)) {
       std::cout << "%" << *n;
     } else {
       std::cout << "(";
-      switch (def.getKind()) {
+      switch (op.getKind()) {
       case Operand::EMPTY:
         std::cout << "Empty";
         break;
       case Operand::SSA_DEF_TYPE:
       case Operand::SSA_DEF_REGCLASS:
         std::cout << "unnamed def";
-        // visitInstr(op.ssaUse().getDef().getParent());
         break;
       case Operand::SSA_DEF_BLOCK:
         std::cout << "unnamed block";
