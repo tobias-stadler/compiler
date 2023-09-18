@@ -500,7 +500,14 @@ ASTPtrResult Parser::parseCompoundStatement() {
   lex->dropToken();
   auto st = std::make_unique<CompoundStAST>();
   sym->pushScope(st->scope);
-  for (ASTPtrResult subSt; (subSt = parseBlockItem());) {
+  while (true) {
+    ASTPtrResult subSt = parseBlockItem();
+    if (!subSt) {
+      if (subSt.isNop()) {
+        break;
+      }
+      return error("Expected block item");
+    }
     st->children.push_back(subSt);
   }
   if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {

@@ -11,9 +11,11 @@ inc_src = [
 'frontend/IRGen.h',
 'frontend/Symbol.h',
 'ir/IR.h',
+'ir/IRPass.h',
 'ir/IRPrinter.h',
 'ir/InstrBuilder.h',
 'ir/IRBuilder.h',
-'ir/LazySSABuilder.h'
+'ir/LazySSABuilder.h',
+'ir/DominatorTree.h'
 ]
 install_headers(inc_src)

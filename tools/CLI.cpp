@@ -1,4 +1,5 @@
 #include "frontend/Symbol.h"
+#include "ir/IRPass.h"
 #include <cstdlib>
 #include <frontend/AST.h>
 #include <frontend/ASTPrinter.h>
@@ -7,10 +8,14 @@
 #include <frontend/Parser.h>
 #include <fstream>
 #include <iostream>
+#include <ir/DominatorTree.h>
 #include <ir/IR.h>
 #include <ir/IRPrinter.h>
 #include <ir/InstrBuilder.h>
+#include <memory>
 #include <string>
+
+const IRInfoID DominatorTree::ID = nullptr;
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {
@@ -42,9 +47,13 @@ int main(int argc, char *argv[]) {
   PrintAST(**ast);
 
   auto prog = IRGenAST(**ast, sym);
-  PrintIR(*prog);
+  auto &func = *prog->functions[0];
 
-  auto &t = VoidSSAType::get();
+  IRPipeline<Function> pipeline;
+  pipeline.addLazyPass(std::make_unique<PrintIRPass>());
+  pipeline.addLazyPass(std::make_unique<DominatorTreePass>());
+  pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
+  pipeline.run(func);
 
   /*
   Function func;
