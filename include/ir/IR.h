@@ -301,6 +301,16 @@ public:
       return false;
     }
   }
+  static constexpr bool kindIsSSARegDef(Kind kind) {
+    switch (kind) {
+    case SSA_DEF_TYPE:
+    case SSA_DEF_REGCLASS:
+      return true;
+    default:
+      return false;
+    }
+  }
+  static constexpr bool kindIsSSAUse(Kind kind) { return kind == SSA_USE; }
   static constexpr bool kindIsDef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
@@ -509,6 +519,10 @@ public:
   }
 
   Block &getParentBlock();
+
+  bool isSSADef() { return kindIsSSADef(kind); }
+  bool isSSARegDef() { return kindIsSSARegDef(kind); }
+  bool isSSAUse() { return kindIsSSAUse(kind); }
 
 private:
   Kind kind = EMPTY;
@@ -748,6 +762,8 @@ public:
       ++numOther;
     }
   }
+
+  bool isPhi() { return kind == INSTR_PHI; }
 
 private:
   unsigned kind;

@@ -44,7 +44,7 @@ class DominatorTreePass : public IRPass<Function> {
 
   void dfs(Block &block, int parentId) {
     int id = tree->numBlocks;
-    auto [_, succ] = tree->dfsPreorderNum.emplace(&block, id);
+    auto [_, succ] = tree->dfsPreorderNum.try_emplace(&block, id);
     if (!succ)
       return;
     tree->dfsPreorderBlock.push_back(&block);

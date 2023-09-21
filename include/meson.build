@@ -16,6 +16,7 @@ inc_src = [
 'ir/InstrBuilder.h',
 'ir/IRBuilder.h',
 'ir/LazySSABuilder.h',
-'ir/DominatorTree.h'
+'ir/DominatorTree.h',
+'ir/RegLiveness.h'
 ]
 install_headers(inc_src)

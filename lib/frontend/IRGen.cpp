@@ -58,7 +58,7 @@ public:
   };
 
   StorageInfo &declareLocal(Symbol &s) {
-    auto [it, succ] = slots.emplace(s.getId(), s);
+    auto [it, succ] = slots.try_emplace(s.getId(), s);
     return it->second;
   }
 

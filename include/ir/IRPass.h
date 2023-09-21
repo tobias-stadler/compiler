@@ -28,7 +28,7 @@ public:
   template <typename T> void advertise() {
     assert(infoPasses.find(&T::ID) == infoPasses.end() &&
            "Multiple passes advertise the same data.");
-    infoPasses.emplace(&T::ID, mPass);
+    infoPasses.try_emplace(&T::ID, mPass);
   }
 
   template <typename T> void publish(T &val) {

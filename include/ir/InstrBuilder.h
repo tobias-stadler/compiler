@@ -31,6 +31,13 @@ public:
     return instr->getChainOperand().chain().getCapacity() / 2;
   }
 
+  Block &getPredecessorBlock(unsigned n) {
+    return instr->getChainOperand().chain().getOperand(n * 2 + 1).block();
+  }
+  Operand &getPredecessorDef(unsigned n) {
+    return instr->getChainOperand().chain().getOperand(n * 2).ssaUse().getDef();
+  }
+
   bool isComplete() { return instr->getChainOperand().chain().isAllocated(); }
 
   void addPredecessor(Operand &def, Block &pred) {

@@ -15,12 +15,14 @@ public:
       : parent(parent), prev(prev), next(next) {}
 
   N &getNext() {
-    assert(isLinked());
+    assert(next);
+    assert(next->isLinked());
     return *static_cast<N *>(next);
   }
 
   N &getPrev() {
-    assert(isLinked());
+    assert(prev);
+    assert(prev->isLinked());
     return *static_cast<N *>(prev);
   }
 
@@ -118,13 +120,14 @@ public:
     using pointer = value_type *;
     using reference = value_type &;
 
+    iterator() {}
     iterator(IntrusiveListNode<N, P> &ref) : mPtr(&ref) {}
 
     reference operator*() const { return static_cast<reference>(*mPtr); }
     pointer operator->() const { return static_cast<pointer>(mPtr); }
 
     iterator &operator++() {
-      mPtr = &mPtr->getNext();
+      mPtr = &mPtr->getNextNode();
       return *this;
     }
 
@@ -135,7 +138,7 @@ public:
     }
 
     iterator &operator--() {
-      mPtr = &mPtr->getPrev();
+      mPtr = &mPtr->getPrevNode();
       return *this;
     }
 
@@ -154,7 +157,7 @@ public:
     }
 
   private:
-    IntrusiveListNode<N, P> *mPtr;
+    IntrusiveListNode<N, P> *mPtr = nullptr;
   };
 
   iterator begin() { return iterator(*sentryBegin.next); }

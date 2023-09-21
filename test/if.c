@@ -1,9 +1,10 @@
 int main() {
   short x = 0, y, z;
+  int c1 = 1, c2 = 2;
   if (x == 5) {
-    y = 1;
+    y = c1;
   } else {
-    y = 2;
+    y = c2;
   }
   z = !y;
 }

@@ -1,5 +1,6 @@
 #include "frontend/Symbol.h"
 #include "ir/IRPass.h"
+#include "ir/RegLiveness.h"
 #include <cstdlib>
 #include <frontend/AST.h>
 #include <frontend/ASTPrinter.h>
@@ -52,7 +53,9 @@ int main(int argc, char *argv[]) {
   IRPipeline<Function> pipeline;
   pipeline.addLazyPass(std::make_unique<PrintIRPass>());
   pipeline.addLazyPass(std::make_unique<DominatorTreePass>());
+  pipeline.addLazyPass(std::make_unique<RegLivenessPass>());
   pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
+  pipeline.addPass(std::make_unique<PrintRegLivenessPass>());
   pipeline.run(func);
 
   /*

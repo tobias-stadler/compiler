@@ -158,7 +158,7 @@ public:
   }
 
   bool addNamedParam(std::string_view name, CountedPtr<Type> type) {
-    auto [_, succ] = paramIndex.emplace(name, paramTypes.size());
+    auto [_, succ] = paramIndex.try_emplace(name, paramTypes.size());
     if (!succ) {
       return false;
     }
@@ -197,7 +197,7 @@ public:
   void addMember(Type *type) { members.push_back(type); }
 
   bool addNamedMember(std::string_view name, Type *type) {
-    auto [_, succ] = memberIndex.emplace(name, members.size());
+    auto [_, succ] = memberIndex.try_emplace(name, members.size());
     if (!succ) {
       return false;
     }
