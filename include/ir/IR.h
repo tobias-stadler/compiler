@@ -171,6 +171,7 @@ public:
     assert(def);
     return *def;
   }
+  Instr &getDefInstr();
   void unlink();
 
 private:
@@ -747,6 +748,8 @@ public:
     assert(n < capacity);
     return operands[n];
   }
+
+  Operand &getLastOperand() { return getOperand(getNumOperands() - 1); }
 
   Operand &getChainOperand() {
     assert(isVariadic());

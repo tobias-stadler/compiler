@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cctype>
 #include <cstdlib>
 #include <format>
@@ -256,6 +257,47 @@ public:
   RecordFactory &fac;
 };
 
+class CodeBuilder {
+public:
+  CodeBuilder &startFunction(std::string_view signature) {
+    header << signature << ";\n";
+    indent();
+    body << signature << " {\n";
+    ++indentationLevel;
+    return *this;
+  }
+
+  CodeBuilder &endFunction() {
+    --indentationLevel;
+    println("}");
+    return *this;
+  }
+
+  CodeBuilder &print(std::string_view txt) {
+    body << txt;
+    return *this;
+  }
+
+  CodeBuilder &println(std::string_view txt = std::string_view()) {
+    if (!txt.empty()) {
+      indent();
+    }
+    body << txt << "\n";
+    return *this;
+  }
+
+  CodeBuilder &indent() {
+    for (int i = 0; i < indentationLevel; ++i) {
+      body << "  ";
+    }
+    return *this;
+  }
+
+  std::ostringstream header;
+  std::ostringstream body;
+  int indentationLevel = 0;
+};
+
 class SymbolTable {};
 
 class RegRecord {};
@@ -291,6 +333,7 @@ public:
     Kind kind;
     std::string_view name;
     std::string_view type;
+    bool isGenerated = false;
   };
 
   struct InstrPat {
@@ -330,7 +373,7 @@ public:
     }
   };
 
-  struct Match : public Record {
+  struct InstrPats : public Record {
     std::vector<InstrPat> instrs;
     void parse(Lexer &lex) {
       while (!lex.matchPeekToken(Token::CURLYC)) {
@@ -349,84 +392,151 @@ public:
     return std::string();
   }
 
-  void genInstrMatch(InstrPat &instrPat, std::string_view instrVar) {
+  void genInstrMatch(InstrPat &instrPat, std::string_view instrVar,
+                     CodeBuilder &code) {
+    if (instrPat.isGenerated) {
+      return;
+    }
+
+    code.println(
+        std::format("if({}.getKind() != Instr::INSTR_{}) return false;",
+                    instrVar, instrPat.opcode));
     instrPat.isGenerated = true;
-    std::cout << std::format(
-        "if({}.getKind() != Instr::INSTR_{}) return false;\n", instrVar,
-        instrPat.opcode);
     unsigned opNum = 0;
     for (auto &op : instrPat.operands) {
       switch (op.kind) {
       case OperandPat::SSA_DEF:
         if (op.name != "_") {
-          std::cout << std::format("auto &def_{} = {}.getOperand({});\n",
-                                   op.name, instrVar, opNum);
+          code.println(std::format("auto &m_def_{} = {}.getOperand({});",
+                                   op.name, instrVar, opNum));
         }
         if (op.type != "_") {
-          std::cout << std::format(
-              "if({}.getOperand({}).ssaDefType() != {}) return false;\n",
-              instrVar, opNum, genType(op.type));
+          code.println(std::format(
+              "if({}.getOperand({}).ssaDefType() != {}) return false;",
+              instrVar, opNum, genType(op.type)));
         }
         break;
       case OperandPat::SSA_USE: {
         if (op.name == "_")
           break;
-        auto it = ssaDefs.find(op.name);
-        if (it == ssaDefs.end()) {
-          error("SSA Def undeclared");
-        }
-        auto &useInstrPat = *it->second;
-        if (useInstrPat.isGenerated) {
-          std::cout << std::format("if(&{}.getOperand({}).ssaUse().getDef() != "
-                                   "&def_{}) return false;\n",
-                                   instrVar, opNum, op.name);
+        auto it = matchSSADefs.find(op.name);
+        assert(it != matchSSADefs.end());
+        auto [usePat, useOpNum] = it->second;
+        if (usePat->operands[useOpNum].kind == OperandPat::SSA_USE) {
+          if (usePat == &instrPat) {
+            code.println(std::format(
+                "auto &m_def_{} = {}.getOperand({}).ssaUse().getDef();",
+                op.name, instrVar, opNum));
+          } else if (usePat->isGenerated) {
+            code.println(
+                std::format("if(&{}.getOperand({}).ssaUse().getDef() != "
+                            "&m_def_{}) return false;",
+                            instrVar, opNum, op.name));
+          } else {
+            error("Cannot match SSA use against ssa use in unconstrained "
+                  "instruction");
+          }
         } else {
-          std::cout << std::format(
-              "auto &def_{}_instr = "
-              "{}.getOperand({}).ssaUse().getDef().getParent();\n",
-              op.name, instrVar, opNum);
-          genInstrMatch(useInstrPat, std::format("def_{}_instr", op.name));
+          code.println(std::format("auto &m_def_{}_instr = "
+                                   "{}.getOperand({}).ssaUse().getDefInstr();",
+                                   op.name, instrVar, opNum));
+          genInstrMatch(*usePat, std::format("m_def_{}_instr", op.name), code);
         }
         break;
       }
       case OperandPat::PLACEHOLDER:
         if (op.name == "_")
           break;
-        std::cout << std::format("auto &ph_{} = {}.getOperand({});\n", op.name,
-                                 instrVar, opNum);
+        code.println(std::format("auto &m_ph_{} = {}.getOperand({});", op.name,
+                                 instrVar, opNum));
         break;
       }
+      op.isGenerated = true;
       ++opNum;
     }
   }
 
-  void genInstrEmit() {
-
+  void genMatch(InstrPats &pats, CodeBuilder &code) {
+    collectMatchSSADefs(pats);
+    genInstrMatch(pats.instrs.back(), "m_root", code);
+    for (auto &instr : pats.instrs) {
+      if (!instr.isGenerated) {
+        error("Ungenerated instruction pattern");
+      }
+      instr.isGenerated = false;
+    }
   }
 
-  void collectSSADefs(Match &m) {
-    for (auto &instr : m.instrs) {
+  void genEmit(InstrPats &pats, CodeBuilder &code) {
+    unsigned instrNum = 0;
+    for (auto &instr : pats.instrs) {
+      code.println(
+          std::format("Instr *e_instr_{} = new Instr(Instr::INSTR_{});",
+                      instrNum, instr.opcode));
+      code.println(std::format("e_instr_{}->allocateOperands({});", instrNum,
+                               instr.operands.size()));
       for (auto &op : instr.operands) {
         if (op.kind == OperandPat::SSA_DEF) {
-          if (op.name == "_") {
-            continue;
+          code.println(std::format(
+              "e_instr_{}->emplaceOperand<Operand::SSA_DEF_TYPE>({});",
+              instrNum, genType(op.type)));
+          if (op.name != "_") {
+            code.println(
+                std::format("auto &e_def_{} = e_instr_{}->getLastOperand();",
+                            op.name, instrNum));
+            auto it = matchSSADefs.find(op.name);
+            if (it != matchSSADefs.end()) {
+              code.println(
+                  std::format("m_def_{}.ssaDef().replaceAllUses(e_def_{});",
+                              op.name, op.name));
+              matchSSADefs.erase(it);
+            }
           }
-          auto [_, succ] = ssaDefs.try_emplace(op.name, &instr);
-          if (!succ) {
+        } else if (op.kind == OperandPat::SSA_USE) {
+          auto it = matchSSADefs.find(op.name);
+          code.println(std::format(
+              "e_instr_{}->emplaceOperand<Operand::SSA_USE>({}_def_{});",
+              instrNum, it == matchSSADefs.end() ? "e" : "m", op.name));
+        } else {
+          error("Unsupported operand pattern in emit");
+        }
+      }
+      ++instrNum;
+    }
+  }
+
+  void collectMatchSSADefs(InstrPats &m) {
+    for (auto &instr : m.instrs) {
+      unsigned opNum = 0;
+      for (auto &op : instr.operands) {
+        if ((op.kind == OperandPat::SSA_DEF ||
+             op.kind == OperandPat::SSA_USE) &&
+            op.name != "_") {
+          auto [_, succ] = matchSSADefs.try_emplace(op.name, &instr, opNum);
+          if (op.kind == OperandPat::SSA_DEF && !succ) {
             error("SSA Def redeclared");
           }
         }
+        ++opNum;
       }
     }
   }
 
-  void gen() {
-    Match &m = dynamic_cast<Match &>(*records[0]);
-    collectSSADefs(m);
-    genInstrMatch(m.instrs.back(), "root");
+  void gen(CodeBuilder &code) {
+    for (auto &rec : records) {
+      InstrPats &pats = dynamic_cast<InstrPats &>(*rec);
+      if (pats.type == "match") {
+        genMatch(pats, code);
+      } else if (pats.type == "emit") {
+        genEmit(pats, code);
+      }
+      code.println();
+    }
+    code.println("return true;");
   }
 
-  std::unordered_map<std::string_view, InstrPat *> ssaDefs;
+  std::unordered_map<std::string_view, std::pair<InstrPat *, unsigned>>
+      matchSSADefs;
 };
 
 int main(int argc, char *argv[]) {
@@ -459,9 +569,9 @@ int main(int argc, char *argv[]) {
                      [&]() { return std::make_unique<DSLListRecord>(); });
 
   facIRPat.registerRecord(
-      "match", []() { return std::make_unique<IRPatternRecord::Match>(); });
+      "match", []() { return std::make_unique<IRPatternRecord::InstrPats>(); });
   facIRPat.registerRecord(
-      "emit", []() { return std::make_unique<IRPatternRecord::Match>(); });
+      "emit", []() { return std::make_unique<IRPatternRecord::InstrPats>(); });
 
   Lexer lex(str);
   RecordSpace rs(fac);
@@ -472,10 +582,14 @@ int main(int argc, char *argv[]) {
   }
   */
   rs.parse(lex);
+  CodeBuilder code;
+  code.startFunction("bool pat()");
   for (auto &rec : rs.records) {
     if (rec->name == argv[2]) {
       IRPatternRecord &pat = dynamic_cast<IRPatternRecord &>(*rec);
-      pat.gen();
+      pat.gen(code);
     }
   }
+  code.endFunction();
+  std::cout << code.body.str();
 }

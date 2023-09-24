@@ -104,3 +104,5 @@ IntrusiveListNode<Instr, Block> &Block::getFirstNonPhiSentry() {
   }
   return getSentryEnd();
 }
+
+Instr &SSAUse::getDefInstr() { return getDef().getParent(); }

@@ -3,9 +3,9 @@ let RISCV = Arch {
 }
 let bruh = IRPattern {
   match {
-  CONST_INT def(%1,_) #1;
-  ADD def(%_,_) %1 %1;
+  ADD def(%1,i16) %2 %3;
   }
   emit {
+  ADD def(%1,i32) %2 %3;
   }
 }
