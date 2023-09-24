@@ -1,7 +1,8 @@
-#include "frontend/ASTPrinter.h"
+#include "c/ASTPrinter.h"
+#include "c/ASTVisitor.h"
+#include "c/Type.h"
 
-#include "frontend/ASTVisitor.h"
-#include "frontend/Type.h"
+namespace c {
 
 namespace {
 
@@ -170,3 +171,4 @@ void PrintAST(AST &ast) {
   PrintASTVisitor().dispatch(ast);
   std::cout << "\n";
 }
+} // namespace c

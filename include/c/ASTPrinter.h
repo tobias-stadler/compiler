@@ -1,5 +1,7 @@
 #pragma once
 
-#include "AST.h"
+#include "c/AST.h"
 
+namespace c {
 void PrintAST(AST &ast);
+}

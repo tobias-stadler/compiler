@@ -1,9 +1,9 @@
-#include "frontend/IRGen.h"
-#include "frontend/AST.h"
-#include "frontend/ASTVisitor.h"
-#include "frontend/Semantics.h"
-#include "frontend/Symbol.h"
-#include "frontend/Type.h"
+#include "c/IRGen.h"
+#include "c/AST.h"
+#include "c/ASTVisitor.h"
+#include "c/Semantics.h"
+#include "c/Symbol.h"
+#include "c/Type.h"
 #include "ir/IR.h"
 #include "ir/IRBuilder.h"
 #include "ir/InstrBuilder.h"
@@ -16,6 +16,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+
+namespace c {
 
 namespace {
 
@@ -451,3 +453,4 @@ std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, SymbolTable &sym) {
   gen.dispatch(ast);
   return gen.ir.endProgram();
 }
+};

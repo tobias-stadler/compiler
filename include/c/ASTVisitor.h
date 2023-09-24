@@ -1,9 +1,11 @@
 #pragma once
 
-#include "frontend/AST.h"
+#include "c/AST.h"
 
 #define VISIT_DELEGATE(AstTy)                                                  \
   impl().visit##AstTy(*static_cast<AstTy##AST *>(&ast));
+
+namespace c {
 
 template <class D> class ASTVisitor {
 
@@ -109,3 +111,5 @@ protected:
   void visitFunctionDefinition(FunctionDefinitionAST &) {}
   void visitTranslationUnit(TranslationUnitAST &) {}
 };
+
+} // namespace c

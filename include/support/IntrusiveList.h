@@ -109,6 +109,9 @@ public:
     }
   }
 
+  N &getFirst() { return getSentryBegin().getNext(); }
+  N &getLast() { return getSentryEnd().getPrev(); }
+
   IntrusiveListNode<N, P> &getSentryBegin() { return sentryBegin; }
   IntrusiveListNode<N, P> &getSentryEnd() { return sentryEnd; }
 

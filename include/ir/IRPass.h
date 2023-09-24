@@ -3,6 +3,7 @@
 #include "ir/IR.h"
 #include <cassert>
 #include <unordered_map>
+#include <utility>
 
 template <typename PassT> class IRPass;
 template <typename PassT> class IRPipeline;
@@ -19,6 +20,20 @@ public:
   virtual void invalidate(IRInfo<PassT> &) {}
 };
 
+enum class PassInvalidation {
+  NONE,
+  ALL,
+};
+
+template <typename PassT> class PassContext {
+public:
+  PassContext() {}
+  PassContext(IRPass<PassT> *pass, PassT *passObj) : pass(pass), obj(passObj) {}
+  IRPass<PassT> *pass = nullptr;
+  PassT *obj = nullptr;
+  bool invalidateAll = false;
+};
+
 template <typename PassT> class IRInfo {
   friend class IRPipeline<PassT>;
 
@@ -26,83 +41,67 @@ public:
   IRInfo() {}
 
   template <typename T> void advertise() {
-    assert(infoPasses.find(&T::ID) == infoPasses.end() &&
+    assert(advertiser.find(&T::ID) == advertiser.end() &&
            "Multiple passes advertise the same data.");
-    infoPasses.try_emplace(&T::ID, mPass);
+    advertiser.try_emplace(&T::ID, ctx.pass);
   }
 
   template <typename T> void publish(T &val) {
-    /*
-    assert(infoPasses.find(&T::ID) != infoPasses.end() &&
-           "Published unadvertised data");
-    assert(infoPasses.find(&T::ID)->second == mPass &&
-           "Published data advertised by other pass");
-    */
-    infoData[&T::ID] = &val;
-  }
-
-  template <typename T> void retract() {
-    auto it = infoData.find(&T::ID);
-    if (it == infoData.end()) {
-      return;
-    }
-    infoData.erase(it);
+    data[&T::ID] = &val;
+    publisher[&T::ID] = ctx.pass;
   }
 
   template <typename T> T &query() {
-    auto it = infoData.find(&T::ID);
+    auto it = data.find(&T::ID);
     void *dataPtr = nullptr;
-    if (it == infoData.end()) {
-      run(getInfoPass(&T::ID), *mPassObj);
-      auto it = infoData.find(&T::ID);
-      assert(it != infoData.end() &&
-             "Registered info passs did not publish promised data.");
-      dataPtr = it->second;
+    if (it == data.end()) {
+      run(getAdvertisingPass(&T::ID), *ctx.obj);
+      auto it2 = data.find(&T::ID);
+      assert(it2 != data.end() &&
+             "Advertised pass did not publish promised data.");
+      dataPtr = it2->second;
     } else {
       dataPtr = it->second;
     }
     return *static_cast<T *>(dataPtr);
   }
 
+  template <typename T> void retract() {
+    data.erase(&T::ID);
+    publisher.erase(&T::ID);
+  }
+
   template <typename T> void preserve() {}
 
-  void invalidate() {
-    for (auto [tyId, _] : infoData) {
-      mPass = &getInfoPass(tyId);
-      mPass->invalidate(*this);
-    }
-  }
+  void invalidateAll() {}
 
 private:
   void run(IRPass<PassT> &pass, PassT &obj) {
-    IRPass<PassT> *passOld = mPass;
-    PassT *passObjOld = mPassObj;
-
-    mPass = &pass;
-    mPassObj = &obj;
+    PassContext oldCtx = ctx;
+    ctx = PassContext(&pass, &obj);
     pass.run(obj, *this);
-
-    mPass = passOld;
-    mPassObj = passObjOld;
+    invalidate();
+    ctx = oldCtx;
   }
 
-  IRPass<PassT> &getInfoPass(IRInfoID ty) {
-    auto it = infoPasses.find(ty);
-    assert(it != infoPasses.end() &&
+  void invalidate() {}
+
+  IRPass<PassT> &getAdvertisingPass(IRInfoID ty) {
+    auto it = advertiser.find(ty);
+    assert(it != advertiser.end() &&
            "No pass is advertising this information.");
     return *it->second;
   }
 
   void clearData() {
-    mPass = nullptr;
-    mPassObj = nullptr;
-    infoData.clear();
+    ctx = PassContext<PassT>();
+    data.clear();
   }
 
-  IRPass<PassT> *mPass = nullptr;
-  PassT *mPassObj = nullptr;
-  std::unordered_map<IRInfoID, void *> infoData;
-  std::unordered_map<IRInfoID, IRPass<PassT> *> infoPasses;
+  std::unordered_map<IRInfoID, void *> data;
+  std::unordered_map<IRInfoID, IRPass<PassT> *> publisher;
+  std::unordered_map<IRInfoID, IRPass<PassT> *> advertiser;
+  PassContext<PassT> ctx;
 };
 
 template <typename PassT> class IRPipeline {
@@ -112,7 +111,7 @@ public:
   }
 
   void addLazyPass(std::unique_ptr<IRPass<PassT>> pass) {
-    info.mPass = pass.get();
+    info.ctx = PassContext<PassT>(pass.get(), nullptr);
     pass->advertise(info);
     lazyPasses.push_back(std::move(pass));
   }

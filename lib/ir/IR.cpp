@@ -43,13 +43,13 @@ void SSAUse::unlink() {
 }
 
 void SSADef::replaceAllUses(Operand &newDef) {
-  if (!chNext) {
-    return;
-  }
   Operand *lastUseOp = nullptr;
   for (Operand *useOp = chNext; useOp; useOp = useOp->ssaUse().chNext) {
     useOp->ssaUse().def = &newDef;
     lastUseOp = useOp;
+  }
+  if (!lastUseOp) {
+    return;
   }
   Operand *newDefFirstUse = newDef.ssaDef().chNext;
   if (newDefFirstUse) {
@@ -96,3 +96,11 @@ OperandChain::iterator OperandChain::begin() { return operands; }
 
 OperandChain::iterator OperandChain::end() { return operands + capacity; }
 
+IntrusiveListNode<Instr, Block> &Block::getFirstNonPhiSentry() {
+  for (auto &instr : *this) {
+    if (!instr.isPhi()) {
+      return instr;
+    }
+  }
+  return getSentryEnd();
+}

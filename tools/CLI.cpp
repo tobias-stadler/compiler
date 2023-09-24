@@ -1,12 +1,12 @@
-#include "frontend/Symbol.h"
 #include "ir/IRPass.h"
+#include "ir/PhiIsolation.h"
 #include "ir/RegLiveness.h"
+#include <c/AST.h>
+#include <c/ASTPrinter.h>
+#include <c/IRGen.h>
+#include <c/Lexer.h>
+#include <c/Parser.h>
 #include <cstdlib>
-#include <frontend/AST.h>
-#include <frontend/ASTPrinter.h>
-#include <frontend/IRGen.h>
-#include <frontend/Lexer.h>
-#include <frontend/Parser.h>
 #include <fstream>
 #include <iostream>
 #include <ir/DominatorTree.h>
@@ -16,9 +16,8 @@
 #include <memory>
 #include <string>
 
-const IRInfoID DominatorTree::ID = nullptr;
-
 int main(int argc, char *argv[]) {
+  using namespace c;
   if (argc != 2) {
     std::cerr << "Expected filename" << std::endl;
     return EXIT_FAILURE;
@@ -56,6 +55,8 @@ int main(int argc, char *argv[]) {
   pipeline.addLazyPass(std::make_unique<RegLivenessPass>());
   pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
   pipeline.addPass(std::make_unique<PrintRegLivenessPass>());
+  pipeline.addPass(std::make_unique<PhiIsolationPass>());
+  pipeline.addPass(std::make_unique<PrintIRPass>());
   pipeline.run(func);
 
   /*

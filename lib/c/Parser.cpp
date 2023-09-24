@@ -1,14 +1,16 @@
-#include "frontend/AST.h"
-#include "frontend/Lexer.h"
-#include "frontend/Type.h"
+#include "c/Parser.h"
+#include "c/AST.h"
+#include "c/Lexer.h"
+#include "c/Type.h"
 #include "support/RefCount.h"
 #include <array>
 #include <cassert>
 #include <charconv>
-#include <frontend/Parser.h>
 #include <memory>
 #include <string>
 #include <string_view>
+
+namespace c {
 
 namespace {
 constexpr AST::Kind tokenBinopKind(Token::Kind kind) {
@@ -557,3 +559,4 @@ bool Parser::nextIsDeclarationList() {
     return true;
   }
 }
+} // namespace c

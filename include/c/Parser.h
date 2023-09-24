@@ -1,10 +1,12 @@
 #pragma once
-#include "frontend/AST.h"
-#include "frontend/Lexer.h"
-#include "frontend/Symbol.h"
-#include "frontend/Type.h"
+#include "c/AST.h"
+#include "c/Lexer.h"
+#include "c/Symbol.h"
+#include "c/Type.h"
 #include <cassert>
 #include <string_view>
+
+namespace c {
 
 class Parser {
 public:
@@ -144,3 +146,4 @@ private:
   Lexer *lex;
   SymbolTable *sym;
 };
+} // namespace c

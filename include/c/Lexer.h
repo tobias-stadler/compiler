@@ -7,6 +7,8 @@
 #include <string_view>
 #include <unordered_map>
 
+namespace c {
+
 class Token {
 public:
   enum Kind {
@@ -394,3 +396,4 @@ private:
     }
   }
 };
+} // namespace C

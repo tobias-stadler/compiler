@@ -1,6 +1,6 @@
 #pragma once
-#include "frontend/Symbol.h"
-#include "frontend/Type.h"
+#include "c/Symbol.h"
+#include "c/Type.h"
 #include "support/RefCount.h"
 #include <cassert>
 #include <cstddef>
@@ -10,6 +10,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+namespace c {
 
 class AST {
 public:
@@ -365,3 +367,4 @@ public:
   template <class U>
   ASTPtrResult(std::unique_ptr<U> &&ast) : ASTResult(std::move(ast)) {}
 };
+} // namespace c

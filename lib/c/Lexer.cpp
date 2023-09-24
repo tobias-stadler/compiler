@@ -1,5 +1,7 @@
-#include <frontend/Lexer.h>
+#include "c/Lexer.h"
 #include <string_view>
+
+namespace c {
 
 std::ostream &operator<<(std::ostream &os, Token tok) {
   os << Token::kindName(tok.kind);
@@ -219,3 +221,5 @@ void Lexer::eatChar() {
   ++currTok.textLen;
 }
 void Lexer::dropToken() { getToken(); }
+
+} // namespace c

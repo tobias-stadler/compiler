@@ -124,11 +124,13 @@ public:
 private:
   static void populatePhi(PhiInstrPtr phi, SSASymbolId id) {
     phi.setupPredecessors(phi->getParent().getNumPredecessors());
+    unsigned predNum = 0;
     for (auto &use : phi->getParent().getDef().ssaDef()) {
       Block &predBlock = use.getParentBlock();
       Operand *predDef = load(id, phi->getDef().ssaDefType(), predBlock);
       assert(predDef);
-      phi.addPredecessor(*predDef, predBlock);
+      phi.setPredecessor(predNum, *predDef, predBlock);
+      ++predNum;
     }
   }
 };

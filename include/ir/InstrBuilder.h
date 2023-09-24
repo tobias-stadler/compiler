@@ -40,15 +40,12 @@ public:
 
   bool isComplete() { return instr->getChainOperand().chain().isAllocated(); }
 
-  void addPredecessor(Operand &def, Block &pred) {
+  void setPredecessor(unsigned n, Operand &def, Block &pred) {
     assert(def.ssaDefType() == instr->getDef().ssaDefType());
     OperandChain &chain = instr->getChainOperand().chain();
-    chain.getOperand(nextOperand++).emplace<Operand::SSA_USE>(instr, def);
-    chain.getOperand(nextOperand++).emplace<Operand::BLOCK>(instr, &pred);
+    chain.getOperand(n * 2).emplace<Operand::SSA_USE>(instr, def);
+    chain.getOperand(n * 2 + 1).emplace<Operand::BLOCK>(instr, &pred);
   }
-
-private:
-  unsigned nextOperand = 0;
 };
 
 class AllocaInstrPtr : public InstrPtr {
@@ -123,7 +120,7 @@ public:
            type.getKind() == SSAType::INT);
     assert(static_cast<IntSSAType &>(type).getBits() >
            static_cast<IntSSAType &>(val.ssaDefType()).getBits());
-    Instr *i = new Instr(isSigned ? Instr::INSTR_EXTS : Instr::INSTR_EXTZ);
+    Instr *i = new Instr(isSigned ? Instr::INSTR_EXT_S : Instr::INSTR_EXT_Z);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i->emplaceOperand<Operand::SSA_USE>(val);
@@ -257,7 +254,7 @@ public:
     return emitBinop(Instr::INSTR_SUB, lhs, rhs);
   }
   Instr &emitMul(Operand &lhs, Operand &rhs, bool isSigned) {
-    return emitBinop(isSigned ? Instr::INSTR_MULS : Instr::INSTR_MULU, lhs,
+    return emitBinop(isSigned ? Instr::INSTR_MUL_S : Instr::INSTR_MUL_U, lhs,
                      rhs);
   }
   Instr &emitAnd(Operand &lhs, Operand &rhs) {

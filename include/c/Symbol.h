@@ -1,9 +1,11 @@
 #pragma once
 
-#include "frontend/Type.h"
+#include "c/Type.h"
 #include "ir/IR.h"
 #include "support/RefCount.h"
 #include <unordered_map>
+
+namespace c {
 
 class Symbol {
   friend class SymbolTable;
@@ -154,3 +156,4 @@ inline Symbol *Scope::getSymbol(IdentId identId) {
   }
   return &it->second;
 }
+};

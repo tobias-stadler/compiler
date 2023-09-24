@@ -1,6 +1,6 @@
+#include "c/Type.h"
 #include "support/RefCount.h"
 #include <cassert>
-#include <frontend/Type.h>
 
 namespace {
 auto initBasicTypes(bool c) {

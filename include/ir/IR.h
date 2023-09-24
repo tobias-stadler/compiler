@@ -486,6 +486,7 @@ public:
   void ssaDefAddUse(Operand &useOp) {
     SSADef &def = ssaDef();
     SSAUse &use = useOp.ssaUse();
+    assert(!use.def);
     use.chNext = def.chNext;
     use.chPrev = nullptr;
     use.def = this;
@@ -576,6 +577,8 @@ public:
 
   unsigned getNumPredecessors() { return blockDef.ssaDef().getNumUses(); }
 
+  IntrusiveListNode<Instr, Block> &getFirstNonPhiSentry();
+
   void *userData = nullptr;
 
 private:
@@ -591,10 +594,10 @@ public:
     INSTR_PHI,
     INSTR_ADD,
     INSTR_SUB,
-    INSTR_MULU,
-    INSTR_MULS,
-    INSTR_DIVU,
-    INSTR_DIVS,
+    INSTR_MUL_U,
+    INSTR_MUL_S,
+    INSTR_DIV_U,
+    INSTR_DIV_S,
     INSTR_SHL,
     INSTR_SHR,
     INSTR_SHR_A,
@@ -606,8 +609,8 @@ public:
     INSTR_CMP,
     INSTR_RET,
     INSTR_CALL,
-    INSTR_EXTZ,
-    INSTR_EXTS,
+    INSTR_EXT_Z,
+    INSTR_EXT_S,
     INSTR_TRUNC,
     INSTR_COPY,
     INSTR_LOAD,
@@ -627,27 +630,27 @@ public:
   static constexpr const char *kindName(unsigned kind) {
     switch (kind) {
     case CONST_INT:
-      return "CONSTint";
+      return "CONST_INT";
     case INSTR_PHI:
       return "PHI";
     case INSTR_ADD:
       return "ADD";
     case INSTR_SUB:
       return "SUB";
-    case INSTR_MULU:
-      return "MULu";
-    case INSTR_MULS:
-      return "MULs";
-    case INSTR_DIVU:
-      return "DIVu";
-    case INSTR_DIVS:
-      return "DIVs";
+    case INSTR_MUL_U:
+      return "MUL_U";
+    case INSTR_MUL_S:
+      return "MUL_S";
+    case INSTR_DIV_U:
+      return "DIV_U";
+    case INSTR_DIV_S:
+      return "DIV_S";
     case INSTR_SHL:
       return "SHL";
     case INSTR_SHR:
       return "SHR";
     case INSTR_SHR_A:
-      return "SHRA";
+      return "SHR_A";
     case INSTR_AND:
       return "AND";
     case INSTR_OR:
@@ -657,17 +660,17 @@ public:
     case INSTR_BR:
       return "BR";
     case INSTR_BR_COND:
-      return "BRcond";
+      return "BR_COND";
     case INSTR_CMP:
       return "CMP";
     case INSTR_RET:
       return "RET";
     case INSTR_CALL:
       return "CALL";
-    case INSTR_EXTZ:
-      return "EXTz";
-    case INSTR_EXTS:
-      return "EXTs";
+    case INSTR_EXT_Z:
+      return "EXT_Z";
+    case INSTR_EXT_S:
+      return "EXT_S";
     case INSTR_TRUNC:
       return "TRUNC";
     case INSTR_COPY:
