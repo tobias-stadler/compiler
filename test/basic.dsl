@@ -1,12 +1,17 @@
-let RISCV = Architecture {
-let x1 = Reg {}
-let x2 = Reg {}
-let registers = dsl_list {x1 x2 x3 x4 x5 x6}
+let riscv = Arch {
+let X0 = Reg {}
+let X1 = Reg {}
+let X2 = Reg {}
+let X3 = Reg {}
+let X4 = Reg {}
+let X5 = Reg {}
+let X6 = Reg {}
+let X7 = Reg {}
 
 let gpr32 = RegClass {
-  dsl_list { x1,x2,x3,x4,x5 }
+  let registers = dsl_list {x1 x2 x3 x4 x5 x6 x7}
 }
-
+let ADD = Instr {}
 let ADDI = Instr {}
 
 let selADDI = IRPattern {
@@ -23,11 +28,6 @@ let selADDI = IRPattern {
   } else {
 
   }
-}
-
-let legalADD = {
-  legal { i32 }
-  by {intExt}
 }
 
 let isel = InstrSelector {

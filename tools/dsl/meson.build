@@ -1,2 +1,2 @@
-dsl_src = ['DSL.cpp']
-dsl_exe = executable('dsl', dsl_src, include_directories: inc, link_with: core_lib)
+dsl_cc_src = ['DSL.cpp']
+dsl_cc_exe = executable('cc', dsl_cc_src)

@@ -10,4 +10,4 @@ core_src = [
 'ir/RegLiveness.cpp',
 'ir/DominatorTree.cpp',
 ]
-core_lib = shared_library('core', core_src, include_directories: inc)
+core_lib = shared_library('core', core_src, dsl_gen_src, include_directories: inc)

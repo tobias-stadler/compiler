@@ -1,6 +1,3 @@
-#include "ir/IRPass.h"
-#include "ir/PhiIsolation.h"
-#include "ir/RegLiveness.h"
 #include <c/AST.h>
 #include <c/ASTPrinter.h>
 #include <c/IRGen.h>
@@ -11,9 +8,13 @@
 #include <iostream>
 #include <ir/DominatorTree.h>
 #include <ir/IR.h>
+#include <ir/IRPass.h>
 #include <ir/IRPrinter.h>
 #include <ir/InstrBuilder.h>
+#include <ir/PhiIsolation.h>
+#include <ir/RegLiveness.h>
 #include <memory>
+#include <riscv/Arch.h>
 #include <string>
 
 int main(int argc, char *argv[]) {

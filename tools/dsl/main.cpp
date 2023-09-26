@@ -172,12 +172,12 @@ public:
     return false;
   }
 
-  Token expectSSANum() {
+  Token expectSSAName() {
     matchNextToken(Token::PERCENT);
     return expectNextToken(Token::IDENT);
   }
 
-  Token expectPlaceholderNum() {
+  Token expectPlaceholderName() {
     matchNextToken(Token::HASH);
     return expectNextToken(Token::IDENT);
   }
@@ -252,24 +252,90 @@ public:
 class RecordSpace : public Record {
 public:
   RecordSpace(RecordFactory &fac) : fac(fac) {}
-  std::vector<std::unique_ptr<Record>> records;
-  void parse(Lexer &lex) override { records = Parser(lex, fac).parseRecords(); }
+  void parse(Lexer &lex) override {
+    records = Parser(lex, fac).parseRecords();
+    for (size_t i = 0; i < records.size(); ++i) {
+      auto &rec = *records[i];
+      if (rec.name.empty() || rec.name == "_") {
+        continue;
+      }
+      auto [_, succ] = recordIndex.try_emplace(rec.name, i);
+      if (!succ) {
+        error("Redeclared record");
+      }
+    }
+  }
+
+  Record *getRecord(std::string_view recName) {
+    auto it = recordIndex.find(recName);
+    if (it == recordIndex.end()) {
+      return nullptr;
+    }
+    return records[it->second].get();
+  }
+
   RecordFactory &fac;
+  std::vector<std::unique_ptr<Record>> records;
+  std::unordered_map<std::string_view, size_t> recordIndex;
+};
+
+class SymbolTable {
+public:
+  Record *getRecord(std::string_view name) {
+
+    for (auto &rs : scopes) {
+      auto *rec = rs->getRecord(name);
+      if (rec) {
+        return rec;
+      }
+    }
+    return nullptr;
+  }
+
+  void pushScope(RecordSpace &rs) { scopes.push_back(&rs); }
+
+  void popScope() { scopes.pop_back(); }
+
+  std::vector<RecordSpace *> scopes;
 };
 
 class CodeBuilder {
 public:
   CodeBuilder &startFunction(std::string_view signature) {
     header << signature << ";\n";
-    indent();
-    body << signature << " {\n";
+    indent().print(signature).print(" {\n");
+    incIndent();
+    return *this;
+  }
+
+  CodeBuilder &startBlock(std::string_view hdr) {
+    if (hdr.empty()) {
+      println("{");
+    } else {
+      indent().print(hdr).print(" {\n");
+    }
+    incIndent();
+    return *this;
+  }
+
+  CodeBuilder &endBlock() {
+    decIndent();
+    println("}");
+    return *this;
+  }
+  CodeBuilder &endClass() {
+    decIndent();
+    println("};");
+    return *this;
+  }
+
+  CodeBuilder &incIndent() {
     ++indentationLevel;
     return *this;
   }
 
-  CodeBuilder &endFunction() {
+  CodeBuilder &decIndent() {
     --indentationLevel;
-    println("}");
     return *this;
   }
 
@@ -298,17 +364,6 @@ public:
   int indentationLevel = 0;
 };
 
-class SymbolTable {};
-
-class RegRecord {};
-class InstrRecord {};
-class RegClassRecord {};
-class ArchitectureRecord {
-  std::vector<RegRecord> regs;
-  std::vector<RegClassRecord> regClasses;
-  std::vector<InstrRecord> instrs;
-};
-
 class DSLListRecord : public Record {
 public:
   void parse(Lexer &lex) override {
@@ -316,6 +371,19 @@ public:
       refs.push_back(lex.nextToken());
     }
   }
+
+  std::vector<Record *> gen(SymbolTable sym) {
+    std::vector<Record *> res;
+    for (auto ref : refs) {
+      auto *rec = sym.getRecord(ref);
+      if (!rec) {
+        error("dsl_list: record not found");
+      }
+      res.push_back(rec);
+    }
+    return res;
+  }
+
   std::vector<std::string_view> refs;
 };
 
@@ -349,14 +417,14 @@ public:
         OperandPat &op = instr.operands.back();
         if (lex.matchPeekToken(Token::PERCENT)) {
           op.kind = OperandPat::SSA_USE;
-          op.name = lex.expectSSANum();
+          op.name = lex.expectSSAName();
           continue;
         }
         if (lex.matchPeekToken(Token::IDENT)) {
           lex.expectNextIdent("def");
           op.kind = OperandPat::SSA_DEF;
           lex.expectNextToken(Token::PARENO);
-          op.name = lex.expectSSANum();
+          op.name = lex.expectSSAName();
           lex.expectNextToken(Token::COMMA);
           op.type = lex.expectNextToken(Token::IDENT);
           lex.expectNextToken(Token::PARENC);
@@ -364,7 +432,7 @@ public:
         }
         if (lex.matchPeekToken(Token::HASH)) {
           op.kind = OperandPat::PLACEHOLDER;
-          op.name = lex.expectPlaceholderNum();
+          op.name = lex.expectPlaceholderName();
           continue;
         }
         error("Invalid operand pattern");
@@ -539,22 +607,53 @@ public:
       matchSSADefs;
 };
 
+void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
+  std::vector<RecordSpace *> regRecs;
+  std::vector<RecordSpace *> regClassRecs;
+  std::vector<RecordSpace *> instrRecs;
+  for (auto &rec : rs.records) {
+    if (rec->type == "Reg") {
+      regRecs.push_back(dynamic_cast<RecordSpace *>(rec.get()));
+    } else if (rec->type == "Instr") {
+      regRecs.push_back(dynamic_cast<RecordSpace *>(rec.get()));
+    } else if (rec->type == "RegClass") {
+      regRecs.push_back(dynamic_cast<RecordSpace *>(rec.get()));
+    }
+  }
+  code.startBlock("enum RegisterKind");
+  for (auto rec : regRecs) {
+    code.println(std::format("{},", rec->name));
+  }
+  code.endClass();
+  code.startBlock("enum InstrKind");
+  code.println("TARGET_INSTR_START = Instr::TARGET_INSTR,");
+  for (auto rec : instrRecs) {
+    code.println(std::format("{},", rec->name));
+  }
+  code.endClass();
+  code.startBlock("enum RegClassKind");
+  for (auto rec : regClassRecs) {
+    code.println(std::format("{},", rec->name));
+  }
+  code.endClass();
+}
+
 int main(int argc, char *argv[]) {
-  if (argc != 3) {
-    std::cerr << "Expected filename" << std::endl;
+  if (argc != 4) {
+    std::cerr << "Expected <in-file> <out-file> <record>" << std::endl;
     return EXIT_FAILURE;
   }
-  std::ifstream f(argv[1], std::ios::ate);
-  if (!f.good()) {
-    std::cerr << "Couldn't open file" << std::endl;
+  std::ifstream inFile(argv[1], std::ios::ate);
+  if (!inFile.good()) {
+    std::cerr << "Couldn't open in file" << std::endl;
     return EXIT_FAILURE;
   }
 
-  auto sz = f.tellg();
-  f.seekg(0);
+  auto sz = inFile.tellg();
+  inFile.seekg(0);
   std::string str;
   str.resize(sz);
-  f.read(str.data(), sz);
+  inFile.read(str.data(), sz);
 
   RecordFactory fac;
   RecordFactory facIRPat;
@@ -567,6 +666,12 @@ int main(int argc, char *argv[]) {
                      [&]() { return std::make_unique<RecordSpace>(fac); });
   fac.registerRecord("dsl_list",
                      [&]() { return std::make_unique<DSLListRecord>(); });
+  fac.registerRecord("Register",
+                     [&]() { return std::make_unique<RecordSpace>(fac); });
+  fac.registerRecord("Instr",
+                     [&]() { return std::make_unique<RecordSpace>(fac); });
+  fac.registerRecord("RegClass",
+                     [&]() { return std::make_unique<RecordSpace>(fac); });
 
   facIRPat.registerRecord(
       "match", []() { return std::make_unique<IRPatternRecord::InstrPats>(); });
@@ -582,14 +687,27 @@ int main(int argc, char *argv[]) {
   }
   */
   rs.parse(lex);
+  SymbolTable sym;
   CodeBuilder code;
-  code.startFunction("bool pat()");
-  for (auto &rec : rs.records) {
-    if (rec->name == argv[2]) {
-      IRPatternRecord &pat = dynamic_cast<IRPatternRecord &>(*rec);
-      pat.gen(code);
-    }
+  sym.pushScope(rs);
+
+  std::string_view genRecName = argv[3];
+  auto *genRec = rs.getRecord(genRecName);
+  if (!genRec) {
+    error("Can't find this record");
   }
-  code.endFunction();
-  std::cout << code.body.str();
+
+  if (genRec->type == "Arch") {
+    genArch(dynamic_cast<RecordSpace &>(*genRec), code, sym);
+  } else {
+    error("Can't generate this record type");
+  }
+
+  std::ofstream outFile(argv[2]);
+  if (!outFile.good()) {
+    std::cerr << "Couldn't open out file" << std::endl;
+    return EXIT_FAILURE;
+  }
+  outFile << code.body.str();
+  return EXIT_SUCCESS;
 }

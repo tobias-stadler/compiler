@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.13)
+
+project(compiler VERSION 1.0 LANGUAGES C CXX)
+
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  set(CMAKE_CXX_EXTENSIONS OFF)
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+  set(CMAKE_CXX_STANDARD 20)
+  set(CMAKE_C_STANDARD 11)
+  include(CTest)
+endif()
+
+add_subdirectory(lib)
+add_subdirectory(dsl)
+add_subdirectory(tools)
+
+
