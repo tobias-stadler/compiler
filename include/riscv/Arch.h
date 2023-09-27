@@ -4,6 +4,6 @@
 
 namespace riscv {
 
-//#include "riscv/Arch.dsl.h"
+#include "riscv/Arch.dsl.h"
 
 }

@@ -10,8 +10,6 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   include(CTest)
 endif()
 
+add_subdirectory(tools/dsl)
 add_subdirectory(lib)
-add_subdirectory(dsl)
 add_subdirectory(tools)
-
-
