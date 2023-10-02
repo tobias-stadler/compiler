@@ -68,9 +68,9 @@ bool SSADef::hasExactlyNUses(unsigned n) {
   return count == n;
 }
 
-Block &Operand::getParentBlock() { return getParent().getParent(); }
+Block &Operand::getParentBlock() const { return getParent().getParent(); }
 
-unsigned SSADef::getNumUses() {
+unsigned SSADef::getNumUses() const {
   unsigned count = 0;
   for (Operand *use = chNext; use; use = use->ssaUse().chNext) {
     ++count;
@@ -105,4 +105,4 @@ IntrusiveListNode<Instr, Block> &Block::getFirstNonPhiSentry() {
   return getSentryEnd();
 }
 
-Instr &SSAUse::getDefInstr() { return getDef().getParent(); }
+Instr &SSAUse::getDefInstr() const { return getDef().getParent(); }

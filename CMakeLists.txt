@@ -8,6 +8,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   set(CMAKE_CXX_STANDARD 20)
   set(CMAKE_C_STANDARD 11)
   include(CTest)
+
+  add_compile_options($<$<CONFIG:Debug>:-fsanitize=address>)
+  add_link_options($<$<CONFIG:Debug>:-fsanitize=address>)
 endif()
 
 add_subdirectory(tools/dsl)

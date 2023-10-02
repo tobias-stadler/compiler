@@ -1,3 +1,4 @@
+#include "ir/InstrSelector.h"
 #include <c/AST.h>
 #include <c/ASTPrinter.h>
 #include <c/IRGen.h>
@@ -51,12 +52,18 @@ int main(int argc, char *argv[]) {
   auto &func = *prog->functions[0];
 
   IRPipeline<Function> pipeline;
+  /*
   pipeline.addLazyPass(std::make_unique<PrintIRPass>());
   pipeline.addLazyPass(std::make_unique<DominatorTreePass>());
   pipeline.addLazyPass(std::make_unique<RegLivenessPass>());
   pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
   pipeline.addPass(std::make_unique<PrintRegLivenessPass>());
   pipeline.addPass(std::make_unique<PhiIsolationPass>());
+  */
+  pipeline.addPass(std::make_unique<PrintIRPass>());
+
+  riscv::InstrSelector isel;
+  pipeline.addPass(std::make_unique<InstrSelectorPass>(isel));
   pipeline.addPass(std::make_unique<PrintIRPass>());
   pipeline.run(func);
 

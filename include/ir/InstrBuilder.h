@@ -20,7 +20,7 @@ protected:
 class PhiInstrPtr : public InstrPtr {
 public:
   PhiInstrPtr(Instr *instr) : InstrPtr(instr) {
-    assert(instr->getKind() == Instr::INSTR_PHI);
+    assert(instr->getKind() == Instr::PHI);
   }
 
   void setupPredecessors(unsigned numPreds) {
@@ -50,7 +50,7 @@ public:
 
 class AllocaInstrPtr : public InstrPtr {
   AllocaInstrPtr(Instr *instr) : InstrPtr(instr) {
-    assert(instr->getKind() == Instr::INSTR_ALLOCA);
+    assert(instr->getKind() == Instr::ALLOCA);
   }
 };
 
@@ -109,7 +109,7 @@ public:
   }
 
   PhiInstrPtr buildPhi(SSAType &type) {
-    Instr *i = new Instr(Instr::INSTR_PHI);
+    Instr *i = new Instr(Instr::PHI);
     i->allocateVariadicOperands(1);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     return i;
@@ -120,7 +120,7 @@ public:
            type.getKind() == SSAType::INT);
     assert(static_cast<IntSSAType &>(type).getBits() >
            static_cast<IntSSAType &>(val.ssaDefType()).getBits());
-    Instr *i = new Instr(isSigned ? Instr::INSTR_EXT_S : Instr::INSTR_EXT_Z);
+    Instr *i = new Instr(isSigned ? Instr::EXT_S : Instr::EXT_Z);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i->emplaceOperand<Operand::SSA_USE>(val);
@@ -133,7 +133,7 @@ public:
            type.getKind() == SSAType::INT);
     assert(static_cast<IntSSAType &>(type).getBits() <
            static_cast<IntSSAType &>(val.ssaDefType()).getBits());
-    Instr *i = new Instr(Instr::INSTR_TRUNC);
+    Instr *i = new Instr(Instr::TRUNC);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i->emplaceOperand<Operand::SSA_USE>(val);
@@ -142,7 +142,7 @@ public:
   }
 
   Instr &emitCopy(Operand &val) {
-    Instr *i = new Instr(Instr::INSTR_COPY);
+    Instr *i = new Instr(Instr::COPY);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
     i->emplaceOperand<Operand::SSA_USE>(val);
@@ -165,7 +165,7 @@ public:
   }
 
   Instr &emitAlloca(SSAType &eleType, unsigned numEle) {
-    Instr *i = new Instr(Instr::INSTR_ALLOCA);
+    Instr *i = new Instr(Instr::ALLOCA);
     i->allocateOperands(3);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
     i->emplaceOperand<Operand::TYPE>(&eleType);
@@ -175,7 +175,7 @@ public:
   }
 
   Instr &emitAlloca(SSAType &eleType, Operand &numEleOp) {
-    Instr *i = new Instr(Instr::INSTR_ALLOCA);
+    Instr *i = new Instr(Instr::ALLOCA);
     i->allocateOperands(3);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
     i->emplaceOperand<Operand::TYPE>(&eleType);
@@ -186,7 +186,7 @@ public:
 
   Instr &emitLoad(SSAType &type, Operand &addr) {
     assert(addr.ssaDefType() == PtrSSAType::get());
-    Instr *i = new Instr(Instr::INSTR_LOAD);
+    Instr *i = new Instr(Instr::LOAD);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i->emplaceOperand<Operand::SSA_USE>(addr);
@@ -197,7 +197,7 @@ public:
   Instr &emitStore(Operand &addr, Operand &val) {
     assert(addr.ssaDefType() == PtrSSAType::get());
     assert(val.getKind() == Operand::SSA_DEF_TYPE);
-    Instr *i = new Instr(Instr::INSTR_STORE);
+    Instr *i = new Instr(Instr::STORE);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_USE>(addr);
     i->emplaceOperand<Operand::SSA_USE>(val);
@@ -207,7 +207,7 @@ public:
 
   Instr &emitCmp(BrCond cond, Operand &lhs, Operand &rhs) {
     assert(lhs.ssaDefType() == rhs.ssaDefType());
-    Instr *i = new Instr(Instr::INSTR_CMP);
+    Instr *i = new Instr(Instr::CMP);
     i->allocateOperands(4);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(IntSSAType::get(1));
     i->emplaceOperand<Operand::BRCOND>(cond);
@@ -218,7 +218,7 @@ public:
   }
 
   Instr &emitBr(Block &dst) {
-    Instr *i = new Instr(Instr::INSTR_BR);
+    Instr *i = new Instr(Instr::BR);
     i->allocateOperands(1);
     i->emplaceOperand<Operand::SSA_USE>(dst.getDef());
     emit(i);
@@ -238,7 +238,7 @@ public:
 
   Instr &emitBrCond(Operand &cond, Block &dstTrue, Block &dstFalse) {
     assert(cond.ssaDefType() == IntSSAType::get(1));
-    Instr *i = new Instr(Instr::INSTR_BR_COND);
+    Instr *i = new Instr(Instr::BR_COND);
     i->allocateOperands(3);
     i->emplaceOperand<Operand::SSA_USE>(cond);
     i->emplaceOperand<Operand::SSA_USE>(dstTrue.getDef());
@@ -248,23 +248,23 @@ public:
   }
 
   Instr &emitAdd(Operand &lhs, Operand &rhs) {
-    return emitBinop(Instr::INSTR_ADD, lhs, rhs);
+    return emitBinop(Instr::ADD, lhs, rhs);
   }
   Instr &emitSub(Operand &lhs, Operand &rhs) {
-    return emitBinop(Instr::INSTR_SUB, lhs, rhs);
+    return emitBinop(Instr::SUB, lhs, rhs);
   }
   Instr &emitMul(Operand &lhs, Operand &rhs, bool isSigned) {
-    return emitBinop(isSigned ? Instr::INSTR_MUL_S : Instr::INSTR_MUL_U, lhs,
+    return emitBinop(isSigned ? Instr::MUL_S : Instr::MUL_U, lhs,
                      rhs);
   }
   Instr &emitAnd(Operand &lhs, Operand &rhs) {
-    return emitBinop(Instr::INSTR_AND, lhs, rhs);
+    return emitBinop(Instr::AND, lhs, rhs);
   }
   Instr &emitOr(Operand &lhs, Operand &rhs) {
-    return emitBinop(Instr::INSTR_OR, lhs, rhs);
+    return emitBinop(Instr::OR, lhs, rhs);
   }
   Instr &emitXor(Operand &lhs, Operand &rhs) {
-    return emitBinop(Instr::INSTR_XOR, lhs, rhs);
+    return emitBinop(Instr::XOR, lhs, rhs);
   }
 
 private:

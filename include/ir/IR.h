@@ -152,7 +152,7 @@ public:
     }
   }
 
-  Kind getKind() { return kind; }
+  Kind getKind() const { return kind; }
 
 private:
   Kind kind;
@@ -167,11 +167,11 @@ public:
   SSAUse(const SSAUse &o) = delete;
   SSAUse &operator=(const SSAUse &o) = delete;
   ~SSAUse() { unlink(); }
-  Operand &getDef() {
+  Operand &getDef() const {
     assert(def);
     return *def;
   }
-  Instr &getDefInstr();
+  Instr &getDefInstr() const;
   void unlink();
 
 private:
@@ -238,7 +238,7 @@ public:
 
   bool hasExactlyNUses(unsigned n);
   bool hasUses() { return chNext; }
-  unsigned getNumUses();
+  unsigned getNumUses() const;
 
 private:
   Operand *chNext = nullptr;
@@ -327,28 +327,18 @@ public:
 
   Operand() {}
   Operand(const Operand &o) = delete;
-  Operand &operator=(const Operand &o) = delete;
   Operand(Operand &&o) = delete;
-  Operand &operator=(Operand &o) noexcept {
+  Operand &operator=(Operand &&o) = delete;
+  Operand &operator=(const Operand &o) {
     destroy();
-    switch (kind) {
+    switch (o.kind) {
     case EMPTY:
       break;
     case SSA_DEF_TYPE:
-      emplace<SSA_DEF_TYPE>(o.parent, o.ssaDef().contentType);
-      o.ssaDef().replaceAllUses(*this);
-      break;
     case SSA_DEF_REGCLASS:
-      emplace<SSA_DEF_REGCLASS>(o.parent, o.ssaDef().contentRegClass);
-      o.ssaDef().replaceAllUses(*this);
-      break;
     case SSA_DEF_BLOCK:
-      emplace<SSA_DEF_BLOCK>(o.parent, o.ssaDef().contentBlock);
-      o.ssaDef().replaceAllUses(*this);
-      break;
     case SSA_DEF_FUNCTION:
-      emplace<SSA_DEF_FUNCTION>(o.parent, o.ssaDef().contentFunction);
-      o.ssaDef().replaceAllUses(*this);
+      assert("Cannot copy SSA Def");
       break;
     case SSA_USE:
       if (o.ssaUse().def) {
@@ -374,7 +364,7 @@ public:
       emplace<BRCOND>(o.parent, o.contentBrCond);
       break;
     case CHAIN:
-      assert(false && "Don't move chain!");
+      assert(false && "Don't copy chain!");
       break;
     }
     return *this;
@@ -464,22 +454,26 @@ public:
     return *ssaDef().contentFunction;
   }
 
-  Block &block() {
+  Block &block() const {
     assert(kind == BLOCK && contentBlock);
     return *contentBlock;
   }
 
-  SSAType &type() {
+  SSAType &type() const {
     assert(kind == TYPE && contentType);
     return *contentType;
   }
 
-  BrCond brCond() {
+  BrCond brCond() const {
     assert(kind == BRCOND);
     return contentBrCond;
   }
 
   OperandChain &chain() {
+    assert(kind == CHAIN);
+    return contentChain;
+  }
+  const OperandChain &chain() const {
     assert(kind == CHAIN);
     return contentChain;
   }
@@ -509,22 +503,26 @@ public:
     assert(kind == SSA_USE);
     return contentUse;
   }
+  const SSAUse &ssaUse() const {
+    assert(kind == SSA_USE);
+    return contentUse;
+  }
 
-  int32_t imm32() {
+  int32_t imm32() const {
     assert(kind == IMM32);
     return contentImm32;
   }
 
-  Instr &getParent() {
+  Instr &getParent() const {
     assert(parent);
     return *parent;
   }
 
-  Block &getParentBlock();
+  Block &getParentBlock() const;
 
-  bool isSSADef() { return kindIsSSADef(kind); }
-  bool isSSARegDef() { return kindIsSSARegDef(kind); }
-  bool isSSAUse() { return kindIsSSAUse(kind); }
+  bool isSSADef() const { return kindIsSSADef(kind); }
+  bool isSSARegDef() const { return kindIsSSARegDef(kind); }
+  bool isSSAUse() const { return kindIsSSAUse(kind); }
 
 private:
   Kind kind = EMPTY;
@@ -590,33 +588,33 @@ class Instr : public IntrusiveListNode<Instr, Block> {
 public:
   enum Kind {
     EMPTY,
-    CONST_INT,
     INSTR_START,
-    INSTR_PHI,
-    INSTR_ADD,
-    INSTR_SUB,
-    INSTR_MUL_U,
-    INSTR_MUL_S,
-    INSTR_DIV_U,
-    INSTR_DIV_S,
-    INSTR_SHL,
-    INSTR_SHR,
-    INSTR_SHR_A,
-    INSTR_AND,
-    INSTR_OR,
-    INSTR_XOR,
-    INSTR_BR,
-    INSTR_BR_COND,
-    INSTR_CMP,
-    INSTR_RET,
-    INSTR_CALL,
-    INSTR_EXT_Z,
-    INSTR_EXT_S,
-    INSTR_TRUNC,
-    INSTR_COPY,
-    INSTR_LOAD,
-    INSTR_STORE,
-    INSTR_ALLOCA,
+    CONST_INT,
+    PHI,
+    ADD,
+    SUB,
+    MUL_U,
+    MUL_S,
+    DIV_U,
+    DIV_S,
+    SHL,
+    SHR,
+    SHR_A,
+    AND,
+    OR,
+    XOR,
+    BR,
+    BR_COND,
+    CMP,
+    RET,
+    CALL,
+    EXT_Z,
+    EXT_S,
+    TRUNC,
+    COPY,
+    LOAD,
+    STORE,
+    ALLOCA,
     INSTR_END,
     TARGET_INSTR,
   };
@@ -632,55 +630,55 @@ public:
     switch (kind) {
     case CONST_INT:
       return "CONST_INT";
-    case INSTR_PHI:
+    case PHI:
       return "PHI";
-    case INSTR_ADD:
+    case ADD:
       return "ADD";
-    case INSTR_SUB:
+    case SUB:
       return "SUB";
-    case INSTR_MUL_U:
+    case MUL_U:
       return "MUL_U";
-    case INSTR_MUL_S:
+    case MUL_S:
       return "MUL_S";
-    case INSTR_DIV_U:
+    case DIV_U:
       return "DIV_U";
-    case INSTR_DIV_S:
+    case DIV_S:
       return "DIV_S";
-    case INSTR_SHL:
+    case SHL:
       return "SHL";
-    case INSTR_SHR:
+    case SHR:
       return "SHR";
-    case INSTR_SHR_A:
+    case SHR_A:
       return "SHR_A";
-    case INSTR_AND:
+    case AND:
       return "AND";
-    case INSTR_OR:
+    case OR:
       return "OR";
-    case INSTR_XOR:
+    case XOR:
       return "XOR";
-    case INSTR_BR:
+    case BR:
       return "BR";
-    case INSTR_BR_COND:
+    case BR_COND:
       return "BR_COND";
-    case INSTR_CMP:
+    case CMP:
       return "CMP";
-    case INSTR_RET:
+    case RET:
       return "RET";
-    case INSTR_CALL:
+    case CALL:
       return "CALL";
-    case INSTR_EXT_Z:
+    case EXT_Z:
       return "EXT_Z";
-    case INSTR_EXT_S:
+    case EXT_S:
       return "EXT_S";
-    case INSTR_TRUNC:
+    case TRUNC:
       return "TRUNC";
-    case INSTR_COPY:
+    case COPY:
       return "COPY";
-    case INSTR_LOAD:
+    case LOAD:
       return "LOAD";
-    case INSTR_STORE:
+    case STORE:
       return "STORE";
-    case INSTR_ALLOCA:
+    case ALLOCA:
       return "ALLOCA";
     }
     if (kindIsTarget(kind)) {
@@ -769,7 +767,7 @@ public:
     }
   }
 
-  bool isPhi() { return kind == INSTR_PHI; }
+  bool isPhi() { return kind == PHI; }
 
 private:
   unsigned kind;

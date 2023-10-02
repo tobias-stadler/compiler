@@ -30,10 +30,10 @@ void DominatorTreePass::dfs(Block &block, int parentId) {
 
   Instr &term = static_cast<Instr &>(block.getSentryEnd().getPrevNode());
   switch (term.getKind()) {
-  case Instr::INSTR_BR:
+  case Instr::BR:
     dfs(term.getOperand(0).ssaUse().getDef().ssaDefBlock(), id);
     break;
-  case Instr::INSTR_BR_COND:
+  case Instr::BR_COND:
     dfs(term.getOperand(1).ssaUse().getDef().ssaDefBlock(), id);
     dfs(term.getOperand(2).ssaUse().getDef().ssaDefBlock(), id);
     break;
