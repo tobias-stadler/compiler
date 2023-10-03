@@ -597,9 +597,9 @@ public:
     MUL_S,
     DIV_U,
     DIV_S,
-    SHL,
-    SHR,
-    SHR_A,
+    SL_L,
+    SR_L,
+    SR_A,
     AND,
     OR,
     XOR,
@@ -644,12 +644,12 @@ public:
       return "DIV_U";
     case DIV_S:
       return "DIV_S";
-    case SHL:
-      return "SHL";
-    case SHR:
-      return "SHR";
-    case SHR_A:
-      return "SHR_A";
+    case SL_L:
+      return "SL_L";
+    case SR_L:
+      return "SR_L";
+    case SR_A:
+      return "SR_A";
     case AND:
       return "AND";
     case OR:

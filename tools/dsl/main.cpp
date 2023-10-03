@@ -6,6 +6,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -15,7 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-void error(std::string_view err) {
+[[noreturn]] void error(std::string_view err) {
   std::cerr << "[Error] " << err << std::endl;
   exit(EXIT_FAILURE);
 }
@@ -54,11 +55,15 @@ public:
     EQ,
     COMMA,
     COLON,
+    LT,
+    GT,
     SLASH_FWD,
     DOT,
     SEMICOLON,
     PERCENT,
     HASH,
+    AT,
+    EXCLAM,
   };
   Kind kind = EMPTY;
   std::string_view str;
@@ -83,20 +88,29 @@ public:
   std::string_view getName() { return idents.back(); }
 };
 
-class Lexer {
+class RecordHdr {
+public:
+  std::string_view name;
+  std::string_view type;
+  bool isTemplateInstance;
+};
+
+class TokenSource {
+public:
+  virtual Token fetchToken() = 0;
+};
+
+class StringTokenSource : public TokenSource {
 public:
   std::string_view str;
   std::string_view::iterator pos;
 
-  Token tok;
+  StringTokenSource(std::string_view str) : str(str), pos(str.begin()) {}
 
-  Lexer(std::string_view str) : str(str), pos(str.begin()) { fetchToken(); }
-
-  void fetchToken() {
-    // assert(tok.kind != Token::EMPTY);
+  Token fetchToken() override {
+    Token tok;
     if (!eatWhitespace()) {
-      tok.kind = Token::EMPTY;
-      return;
+      return tok;
     }
 
     auto kind = getSingleCharKind();
@@ -104,7 +118,7 @@ public:
       tok.kind = kind;
       auto tmp = pos++;
       tok.str = std::string_view(tmp, pos);
-      return;
+      return tok;
     }
 
     static const std::regex identRegEx("([a-zA-Z_0-9]+)");
@@ -130,7 +144,7 @@ public:
       tok.str = std::string_view(m[1].first, m[1].second);
       tok.kind = kind;
       pos = m[0].second;
-      return;
+      return tok;
     }
     error(std::format("Invalid token: {}", *pos));
   }
@@ -165,19 +179,17 @@ public:
       return Token::SLASH_FWD;
     case '.':
       return Token::DOT;
+    case '<':
+      return Token::LT;
+    case '>':
+      return Token::GT;
+    case '@':
+      return Token::AT;
+    case '!':
+      return Token::EXCLAM;
     default:
       return Token::EMPTY;
     }
-  }
-
-  Token peekToken() { return tok; }
-
-  Token::Kind peekTokenKind() { return tok.kind; }
-
-  Token nextToken() {
-    Token tmp = tok;
-    fetchToken();
-    return tmp;
   }
 
   bool eatWhitespace() {
@@ -192,22 +204,41 @@ public:
       }
     }
   }
+};
 
-  bool matchPeekToken(Token::Kind kind) {
+class Lexer {
+public:
+  TokenSource &tokSrc;
+  Token tok;
+
+  Lexer(TokenSource &tokSrc) : tokSrc(tokSrc) { fetchToken(); }
+
+  void fetchToken() { tok = tokSrc.fetchToken(); }
+  Token peek() { return tok; }
+
+  Token::Kind peekKind() { return tok.kind; }
+
+  Token next() {
+    Token tmp = tok;
+    fetchToken();
+    return tmp;
+  }
+
+  bool match(Token::Kind kind) {
     if (tok.kind != kind)
       return false;
 
     return true;
   }
 
-  bool matchPeekTokenOrEmpty(Token::Kind kind) {
+  bool matchOrEmpty(Token::Kind kind) {
     if (tok.kind == kind || tok.kind == Token::EMPTY) {
       return true;
     }
     return false;
   }
 
-  bool matchNextToken(Token::Kind kind) {
+  bool matchNext(Token::Kind kind) {
     if (tok.kind != kind)
       return false;
 
@@ -215,7 +246,7 @@ public:
     return true;
   }
 
-  bool matchNextTokenOrEmpty(Token::Kind kind) {
+  bool matchOrEmptyNext(Token::Kind kind) {
     if (tok.kind != kind && tok.kind != Token::EMPTY)
       return false;
 
@@ -223,21 +254,21 @@ public:
     return true;
   }
 
-  Token expectNextToken(Token::Kind kind) {
+  Token expectNext(Token::Kind kind) {
     if (tok.kind != kind)
       error(std::string("Expected different token. Got: ")
                 .append(std::string_view(tok)));
 
-    return nextToken();
+    return next();
   }
 
-  void expectNextIdent(std::string_view ident) {
-    if (expectNextToken(Token::IDENT) != ident) {
+  void expectIdentNext(std::string_view ident) {
+    if (expectNext(Token::IDENT) != ident) {
       error("Expected different ident");
     }
   }
 
-  bool matchNextIdent(std::string_view ident) {
+  bool matchIdentNext(std::string_view ident) {
     if (tok.kind == Token::IDENT && tok == ident) {
       fetchToken();
       return true;
@@ -246,27 +277,40 @@ public:
   }
 
   Token expectSSAName() {
-    matchNextToken(Token::PERCENT);
-    return expectNextToken(Token::IDENT);
+    matchNext(Token::PERCENT);
+    return expectNext(Token::IDENT);
   }
 
   Token expectPlaceholderName() {
-    matchNextToken(Token::HASH);
-    return expectNextToken(Token::IDENT);
+    matchNext(Token::HASH);
+    return expectNext(Token::IDENT);
   }
 
   void expectDoubleColon() {
-    expectNextToken(Token::COLON);
-    expectNextToken(Token::COLON);
+    expectNext(Token::COLON);
+    expectNext(Token::COLON);
   }
 
   RecordIdent expectRecordIdent() {
     std::vector<std::string_view> res;
-    res.push_back(expectNextToken(Token::IDENT));
-    while (matchPeekToken(Token::COLON)) {
+    res.push_back(expectNext(Token::IDENT));
+    while (match(Token::COLON)) {
       expectDoubleColon();
-      res.push_back(expectNextToken(Token::IDENT));
+      res.push_back(expectNext(Token::IDENT));
     }
+    return res;
+  }
+
+  RecordHdr expectRecordHdr() {
+    RecordHdr res;
+    if (matchIdentNext("let")) {
+      res.name = expectNext(Token::IDENT);
+      expectNext(Token::EQ);
+    }
+    if (matchNext(Token::EXCLAM)) {
+      res.isTemplateInstance = true;
+    }
+    res.type = expectNext(Token::IDENT);
     return res;
   }
 };
@@ -284,9 +328,49 @@ public:
   RecordSpace *parent = nullptr;
 };
 
+class TokenRecord : public Record {
+public:
+  TokenRecord() { type = "token"; }
+
+  void parse(Lexer &lex) override {
+    unsigned braces = 1;
+    while (true) {
+      switch (lex.peekKind()) {
+      case Token::CURLYO:
+        ++braces;
+        break;
+      case Token::CURLYC:
+        --braces;
+        break;
+      case Token::EMPTY:
+        error("Token empty in TokenRecord");
+        break;
+      default:
+        break;
+      }
+      if (braces == 0) {
+        break;
+      } else {
+        toks.emplace_back(lex.next());
+      }
+    }
+  }
+  std::vector<Token> toks;
+  std::string_view realType;
+};
+
 class RecordFactory {
 public:
   using factory_func = std::function<std::unique_ptr<Record>()>;
+
+  RecordFactory() {}
+
+  RecordFactory(
+      std::initializer_list<std::pair<const char *, factory_func>> init) {
+    for (auto &i : init) {
+      registerRecord(i.first, i.second);
+    }
+  }
 
   std::unique_ptr<Record> createRecord(std::string_view type) {
     auto it = recTemplates.find(type);
@@ -306,57 +390,10 @@ private:
   std::unordered_map<std::string_view, factory_func> recTemplates;
 };
 
-class Parser {
-public:
-  Parser(Lexer &lex, RecordFactory &factory) : lex(lex), factory(factory) {}
-
-  std::vector<std::unique_ptr<Record>> parseRecords() {
-    std::vector<std::unique_ptr<Record>> recs;
-    while (!lex.matchPeekTokenOrEmpty(Token::CURLYC)) {
-      recs.push_back(parseRecord());
-    }
-    return recs;
-  }
-
-  std::unique_ptr<Record> parseRecord() {
-    std::string_view recName;
-    if (lex.matchNextIdent("let")) {
-      recName = lex.expectNextToken(Token::IDENT);
-      lex.expectNextToken(Token::EQ);
-    }
-    std::string_view recType = lex.expectNextToken(Token::IDENT);
-    auto recPtr = factory.createRecord(recType);
-    if (!recPtr) {
-      error(std::format("Invalid record type: {}", recType));
-    }
-    recPtr->name = recName;
-    lex.expectNextToken(Token::CURLYO);
-    recPtr->parse(lex);
-    lex.expectNextToken(Token::CURLYC);
-    return recPtr;
-  }
-
-  Lexer &lex;
-  RecordFactory &factory;
-};
-
 class RecordSpace : public Record {
 public:
   RecordSpace(RecordFactory &fac) : fac(fac) {}
-  void parse(Lexer &lex) override {
-    records = Parser(lex, fac).parseRecords();
-    for (size_t i = 0; i < records.size(); ++i) {
-      auto &rec = *records[i];
-      rec.parent = this;
-      if (rec.name.empty() || rec.name == "_") {
-        continue;
-      }
-      auto [_, succ] = recordIndex.try_emplace(rec.name, i);
-      if (!succ) {
-        error("Redeclared record");
-      }
-    }
-  }
+  void parse(Lexer &lex) override;
 
   Record *getRecord(std::string_view recName) {
     auto it = recordIndex.find(recName);
@@ -364,6 +401,39 @@ public:
       return nullptr;
     }
     return records[it->second].get();
+  }
+
+  void addRecord(std::unique_ptr<Record> recPtr) {
+    assert(recPtr);
+    Record *rec = recPtr.get();
+    records.emplace_back(std::move(recPtr));
+    rec->parent = this;
+    if (rec->name.empty() || rec->name == "_") {
+      return;
+    }
+    auto [_, succ] = recordIndex.try_emplace(rec->name, records.size() - 1);
+    if (!succ) {
+      error("Redeclared record");
+    }
+  }
+
+  template <typename T>
+  void gather(std::vector<T *> &out, std::string_view type) {
+    for (auto &rec : records) {
+      if (rec->type == type) {
+        out.push_back(dynamic_cast<T *>(rec.get()));
+      }
+    }
+  }
+
+  template <typename T>
+  void gatherRecursively(std::vector<T *> &out, std::string_view type) {
+    gather(out, type);
+    for (auto &rec : records) {
+      if (auto *rs = dynamic_cast<RecordSpace *>(rec.get())) {
+        rs->gatherRecursively(out, type);
+      }
+    }
   }
 
   RecordFactory &fac;
@@ -408,7 +478,7 @@ public:
 class DSLListRecord : public Record {
 public:
   void parse(Lexer &lex) override {
-    while (lex.matchPeekToken(Token::IDENT)) {
+    while (lex.match(Token::IDENT)) {
       refs.emplace_back(lex.expectRecordIdent());
     }
   }
@@ -446,6 +516,111 @@ public:
     }
   }
 };
+
+class TemplateRecord : public RecordSpace {
+public:
+  static RecordFactory facImpl;
+  TemplateRecord() : RecordSpace(facImpl) {}
+  class TokVarRecord : public Record {};
+  void parse(Lexer &lex) override {
+    while (!lex.matchOrEmpty(Token::CURLYC)) {
+      RecordHdr hdr = lex.expectRecordHdr();
+      lex.expectNext(Token::CURLYO);
+      if (hdr.isTemplateInstance) {
+        error("Template instantiation not allowed in Template");
+      }
+      auto recPtr = std::make_unique<TokenRecord>();
+      recPtr->name = hdr.name;
+      recPtr->realType = hdr.type;
+      recPtr->parse(lex);
+      lex.expectNext(Token::CURLYC);
+      addRecord(std::move(recPtr));
+    }
+  }
+};
+
+RecordFactory TemplateRecord::facImpl{
+    {"template_var",
+     []() { return std::make_unique<TemplateRecord::TokVarRecord>(); }},
+};
+
+class InstanceRecord : public RecordSpace {
+public:
+  InstanceRecord(RecordFactory &fac) : RecordSpace(fac) { type = "Instance"; }
+
+  void materialize(TemplateRecord &tempRec);
+
+  std::string_view templateName;
+};
+
+void RecordSpace::parse(Lexer &lex) {
+  while (!lex.matchOrEmpty(Token::CURLYC)) {
+    RecordHdr hdr = lex.expectRecordHdr();
+    lex.expectNext(Token::CURLYO);
+    std::unique_ptr<Record> recPtr;
+    if (hdr.isTemplateInstance) {
+      auto instRecPtr = std::make_unique<InstanceRecord>(fac);
+      instRecPtr->templateName = hdr.type;
+      recPtr = std::move(instRecPtr);
+    } else {
+      recPtr = fac.createRecord(hdr.type);
+      if (!recPtr) {
+        error(std::format("Invalid record type: {}", hdr.type));
+      }
+    }
+    recPtr->name = hdr.name;
+    recPtr->parse(lex);
+    lex.expectNext(Token::CURLYC);
+    addRecord(std::move(recPtr));
+  }
+}
+
+class TemplatedTokenSource : public TokenSource {
+public:
+  InstanceRecord &instanceRec;
+  TokenRecord &tokRec;
+  size_t pos = 0;
+  size_t subPos;
+  TokenRecord *subTokRec = nullptr;
+
+  TemplatedTokenSource(InstanceRecord &instanceRec, TokenRecord &tokRec)
+      : instanceRec(instanceRec), tokRec(tokRec) {}
+
+  Token fetchToken() override {
+    if (subTokRec) {
+      if (subPos < subTokRec->toks.size()) {
+        return subTokRec->toks[subPos++];
+      }
+      subTokRec = nullptr;
+    }
+    if (pos >= tokRec.toks.size()) {
+      return Token();
+    }
+    Token &tok = tokRec.toks[pos++];
+    if (tok.kind == Token::IDENT) {
+      subTokRec = dynamic_cast<TokenRecord *>(instanceRec.getRecord(tok.str));
+      if (subTokRec && subTokRec->toks.size() > 0) {
+        subPos = 0;
+        return subTokRec->toks[subPos++];
+      }
+      subTokRec = nullptr;
+    }
+    return tok;
+  }
+};
+
+void InstanceRecord::materialize(TemplateRecord &tempRec) {
+  for (auto &recPtr : tempRec.records) {
+    auto *tokRec = dynamic_cast<TokenRecord *>(recPtr.get());
+    if (!tokRec)
+      continue;
+    TemplatedTokenSource tokSrc(*this, *tokRec);
+    Lexer lex(tokSrc);
+    auto rec = fac.createRecord(tokRec->realType);
+    rec->parse(lex);
+    addRecord(std::move(rec));
+  }
+}
 
 class CodeBuilder {
 public:
@@ -518,10 +693,11 @@ public:
   IncludeRecord(RecordFactory &fac) : RecordSpace(fac) {}
 
   void parse(Lexer &lex) override {
-    childContent = loadFile(
-        includeDir + '/' +
-        std::string(std::string_view(lex.expectNextToken(Token::STR))));
-    Lexer childLex(childContent);
+    childContent =
+        loadFile(includeDir + '/' +
+                 std::string(std::string_view(lex.expectNext(Token::STR))));
+    StringTokenSource tokSrc(childContent);
+    Lexer childLex(tokSrc);
     RecordSpace::parse(childLex);
   }
 
@@ -554,25 +730,25 @@ public:
     static InstrPat parse(Lexer &lex) {
       InstrPat instr;
       instr.opcode = lex.expectRecordIdent();
-      while (!lex.matchNextTokenOrEmpty(Token::SEMICOLON)) {
+      while (!lex.matchOrEmptyNext(Token::SEMICOLON)) {
         instr.operands.emplace_back();
         OperandPat &op = instr.operands.back();
-        if (lex.matchPeekToken(Token::PERCENT)) {
+        if (lex.match(Token::PERCENT)) {
           op.kind = OperandPat::SSA_USE;
           op.name = lex.expectSSAName();
           continue;
         }
-        if (lex.matchPeekToken(Token::IDENT)) {
-          lex.expectNextIdent("def");
+        if (lex.match(Token::IDENT)) {
+          lex.expectIdentNext("def");
           op.kind = OperandPat::SSA_DEF;
-          lex.expectNextToken(Token::PARENO);
+          lex.expectNext(Token::PARENO);
           op.name = lex.expectSSAName();
-          lex.expectNextToken(Token::COMMA);
-          op.type = lex.expectNextToken(Token::IDENT);
-          lex.expectNextToken(Token::PARENC);
+          lex.expectNext(Token::COMMA);
+          op.type = lex.expectNext(Token::IDENT);
+          lex.expectNext(Token::PARENC);
           continue;
         }
-        if (lex.matchPeekToken(Token::HASH)) {
+        if (lex.match(Token::HASH)) {
           op.kind = OperandPat::PLACEHOLDER;
           op.name = lex.expectPlaceholderName();
           continue;
@@ -594,7 +770,7 @@ public:
   struct InstrPats {
     std::vector<InstrPat> instrs;
     void parse(Lexer &lex) {
-      while (!lex.matchPeekToken(Token::CURLYC)) {
+      while (!lex.match(Token::CURLYC)) {
         instrs.push_back(InstrPat::parse(lex));
       }
     }
@@ -603,19 +779,19 @@ public:
   struct IfPat {
     void parse(Lexer &lex) {
       while (true) {
-        switch (lex.peekTokenKind()) {
+        switch (lex.peekKind()) {
         case Token::CURLYC:
           return;
         default:
           error("[ir_pat] Invalid token in if");
           break;
         case Token::CODE:
-          code.push_back(lex.nextToken());
+          code.push_back(lex.next());
           break;
         case Token::HASH:
         case Token::PERCENT:
           lex.fetchToken();
-          code.push_back(lex.expectNextToken(Token::IDENT));
+          code.push_back(lex.expectNext(Token::IDENT));
           break;
         }
       }
@@ -784,9 +960,9 @@ public:
   }
 
   void parse(Lexer &lex) override {
-    while (!lex.matchPeekTokenOrEmpty(Token::CURLYC)) {
-      std::string_view recType = lex.expectNextToken(Token::IDENT);
-      lex.expectNextToken(Token::CURLYO);
+    while (!lex.matchOrEmpty(Token::CURLYC)) {
+      std::string_view recType = lex.expectNext(Token::IDENT);
+      lex.expectNext(Token::CURLYO);
       if (recType == "match") {
         if (matchPats.instrs.size() != 0) {
           error("Multiple match patterns in ir_pat");
@@ -803,7 +979,7 @@ public:
       } else {
         error("Invalid operator in ir_pat");
       }
-      lex.expectNextToken(Token::CURLYC);
+      lex.expectNext(Token::CURLYC);
     }
   }
 
@@ -834,15 +1010,10 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   std::vector<RecordSpace *> regRecs;
   std::vector<RecordSpace *> regClassRecs;
   std::vector<RecordSpace *> instrRecs;
-  for (auto &rec : rs.records) {
-    if (rec->type == "Register") {
-      regRecs.push_back(dynamic_cast<RecordSpace *>(rec.get()));
-    } else if (rec->type == "Instr") {
-      instrRecs.push_back(dynamic_cast<RecordSpace *>(rec.get()));
-    } else if (rec->type == "RegClass") {
-      regClassRecs.push_back(dynamic_cast<RecordSpace *>(rec.get()));
-    }
-  }
+  rs.gather(regRecs, "Register");
+  rs.gather(regClassRecs, "RegClass");
+  rs.gather(instrRecs, "Instr");
+
   code.startBlock("enum RegisterKind");
   for (auto rec : regRecs) {
     code.println(std::format("{},", rec->name));
@@ -863,28 +1034,30 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
 
 void genInstrSelector(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   std::vector<IRPatternRecord *> recs;
-  std::transform(
-      rs.records.begin(), rs.records.end(), std::back_inserter(recs),
-      [](auto &rec) { return &dynamic_cast<IRPatternRecord &>(*rec); });
-  std::stable_sort(recs.begin(), recs.end(),
-                   [](IRPatternRecord *a, IRPatternRecord *b) {
-                     return a->matchPats.instrs.back().opcode.getName() <
-                            b->matchPats.instrs.back().opcode.getName();
-                   });
+  rs.gatherRecursively(recs, "ir_pat");
+  std::stable_sort(
+      recs.begin(), recs.end(), [](IRPatternRecord *a, IRPatternRecord *b) {
+        if (a->matchPats.instrs.back().opcode.getName() ==
+            b->matchPats.instrs.back().opcode.getName()) {
+          return a->matchPats.instrs.size() > b->matchPats.instrs.size();
+        }
+        return a->matchPats.instrs.back().opcode.getName() <
+               b->matchPats.instrs.back().opcode.getName();
+      });
   int numSameOpc = 0;
   std::string_view lastOpc;
   for (auto *rec : recs) {
     std::string_view opcName = rec->matchPats.instrs.back().opcode.getName();
-    code.startFunction(
-        std::format("bool dslPat{}{}(Instr &m_root)", opcName, numSameOpc));
-    rec->gen(code, sym);
-    code.endBlock();
     if (opcName == lastOpc) {
       ++numSameOpc;
     } else {
       numSameOpc = 0;
       lastOpc = opcName;
     }
+    code.startFunction(
+        std::format("bool dslPat{}{}(Instr &m_root)", opcName, numSameOpc));
+    rec->gen(code, sym);
+    code.endBlock();
   }
   numSameOpc = 0;
   lastOpc = std::string_view();
@@ -911,6 +1084,21 @@ void genInstrSelector(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   code.endBlock();
 }
 
+void materializeTemplates(RecordSpace &rs, SymbolTable &sym) {
+  for (auto &recPtr : rs.records) {
+    if (auto *rec = dynamic_cast<InstanceRecord *>(recPtr.get())) {
+      auto *tempRec =
+          dynamic_cast<TemplateRecord *>(sym.getRecord(rec->templateName));
+      if (!tempRec) {
+        error("Cannot materialize undefined template");
+      }
+      rec->materialize(*tempRec);
+    } else if (auto *rec = dynamic_cast<RecordSpace *>(recPtr.get())) {
+      materializeTemplates(*rec, sym);
+    }
+  }
+}
+
 int main(int argc, char *argv[]) {
   if (argc != 5) {
     std::cerr << "Expected <in-file> <out-file> <record> <include-dir>"
@@ -920,7 +1108,6 @@ int main(int argc, char *argv[]) {
   includeDir = argv[4];
 
   RecordFactory fac;
-  RecordFactory facIRPat;
   fac.registerRecord("ir_pat",
                      [&]() { return std::make_unique<IRPatternRecord>(); });
   fac.registerRecord("Arch",
@@ -938,9 +1125,17 @@ int main(int argc, char *argv[]) {
   fac.registerRecord("include",
                      [&] { return std::make_unique<IncludeRecord>(fac); });
   fac.registerRecord("using", [&] { return std::make_unique<UsingRecord>(); });
+  fac.registerRecord("Template",
+                     [&] { return std::make_unique<TemplateRecord>(); });
+  fac.registerRecord("token", [] {
+    auto rec = std::make_unique<TokenRecord>();
+    rec->realType = "token";
+    return rec;
+  });
 
   std::string str = loadFile(argv[1]);
-  Lexer lex(str);
+  StringTokenSource tokSrc(str);
+  Lexer lex(tokSrc);
   RecordSpace rs(fac);
 
   rs.parse(lex);
@@ -954,11 +1149,14 @@ int main(int argc, char *argv[]) {
     error("Can't find this record");
   }
 
-  for (auto &rec : rs.records) {
-    if (rec->type == "using") {
-      dynamic_cast<UsingRecord &>(*rec.get()).pushSymbols(sym);
-    }
+  std::vector<UsingRecord *> usingRecs;
+  rs.gather(usingRecs, "using");
+
+  for (auto *rec : usingRecs) {
+    rec->pushSymbols(sym);
   }
+
+  materializeTemplates(rs, sym);
 
   if (genRec->type == "Arch") {
     genArch(dynamic_cast<RecordSpace &>(*genRec), code, sym);
