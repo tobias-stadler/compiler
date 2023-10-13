@@ -35,6 +35,7 @@ public:
     DERIVED_START,
     ARR,
     STRUCT,
+    UNION,
     FUNC,
     PTR,
     DERIVED_END
@@ -184,7 +185,8 @@ private:
 
 class StructType : public Type {
 public:
-  StructType() : Type(STRUCT, Qualifier()) {}
+  StructType(bool isUnion, std::string_view name)
+      : Type(isUnion ? UNION : STRUCT, Qualifier()), name(name) {}
 
   Type *getNamedMemberType(std::string_view name) {
     auto it = memberIndex.find(name);
@@ -194,9 +196,11 @@ public:
     return members[it->second].get();
   }
 
-  void addMember(Type *type) { members.push_back(type); }
+  void addMember(CountedPtr<Type> type) {
+    members.emplace_back(std::move(type));
+  }
 
-  bool addNamedMember(std::string_view name, Type *type) {
+  bool addNamedMember(std::string_view name, CountedPtr<Type> type) {
     auto [_, succ] = memberIndex.try_emplace(name, members.size());
     if (!succ) {
       return false;
@@ -206,6 +210,7 @@ public:
   }
 
 private:
+  std::string_view name;
   std::vector<CountedPtr<Type>> members;
   std::unordered_map<std::string_view, size_t> memberIndex;
 };

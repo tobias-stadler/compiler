@@ -44,11 +44,10 @@ public:
   bool isLinked() { return parent && next && prev; }
 
   void unlink() {
-    if (!isLinked()) {
-      return;
-    }
-    prev->next = next;
-    next->prev = prev;
+    if (prev)
+      prev->next = next;
+    if (next)
+      next->prev = prev;
     parent = nullptr;
     next = nullptr;
     prev = nullptr;
@@ -165,6 +164,9 @@ public:
 
   iterator begin() { return iterator(*sentryBegin.next); }
   iterator end() { return iterator(sentryEnd); }
+
+  auto rbegin() { return std::make_reverse_iterator(end()); }
+  auto rend() { return std::make_reverse_iterator(begin()); }
 
 protected:
   IntrusiveList(const IntrusiveList &o) = delete;

@@ -626,6 +626,21 @@ public:
     return kind > TARGET_INSTR;
   }
 
+  static constexpr bool kindHasSideEffects(unsigned kind) {
+    switch (kind) {
+    default:
+      return false;
+    case PHI:
+    case BR:
+    case BR_COND:
+    case RET:
+    case CALL:
+    case LOAD:
+    case STORE:
+      return true;
+    }
+  }
+
   static constexpr const char *kindName(unsigned kind) {
     switch (kind) {
     case CONST_INT:
@@ -691,6 +706,10 @@ public:
 
   iterator begin() { return operands; }
   iterator end() { return operands + capacity; }
+  iterator def_begin() { return operands; }
+  iterator def_end() { return operands + numDefs; }
+  iterator other_begin() { return operands + numDefs; }
+  iterator other_end() { return operands + numDefs; }
 
   Instr(unsigned kind) : kind(kind) {}
   Instr(const Instr &o) = delete;

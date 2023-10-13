@@ -1,8 +1,10 @@
 #include "c/Parser.h"
 #include "c/AST.h"
 #include "c/Lexer.h"
+#include "c/Symbol.h"
 #include "c/Type.h"
 #include "support/RefCount.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <charconv>
@@ -94,6 +96,10 @@ constexpr AST::Kind tokenUnopKind(Token::Kind kind) {
     return AST::INC_PRE;
   case Token::PUNCT_MINUSMINUS:
     return AST::DEC_PRE;
+  case Token::PUNCT_PLUS:
+    return AST::PLUS;
+  case Token::PUNCT_MINUS:
+    return AST::MINUS;
   }
 }
 
@@ -151,12 +157,65 @@ constexpr bool precedenceRightAssoc(int prec) {
     return true;
   }
 }
+
+auto getTypeSpecSets() {
+  std::vector<std::pair<std::vector<Token::Kind>, Type::Kind>> typeSpecSets{
+      {{Token::KEYWORD_VOID}, Type::VOID},
+
+      {{Token::KEYWORD_CHAR}, Type::SCHAR},
+      {{Token::KEYWORD_CHAR, Token::KEYWORD_SIGNED}, Type::SCHAR},
+      {{Token::KEYWORD_CHAR, Token::KEYWORD_UNSIGNED}, Type::UCHAR},
+
+      {{Token::KEYWORD_SHORT}, Type::SSHORT},
+      {{Token::KEYWORD_SHORT, Token::KEYWORD_SIGNED}, Type::SSHORT},
+      {{Token::KEYWORD_SHORT, Token::KEYWORD_SIGNED, Token::KEYWORD_INT},
+       Type::SSHORT},
+      {{Token::KEYWORD_SHORT, Token::KEYWORD_UNSIGNED}, Type::USHORT},
+      {{Token::KEYWORD_SHORT, Token::KEYWORD_UNSIGNED, Token::KEYWORD_INT},
+       Type::USHORT},
+
+      {{Token::KEYWORD_INT}, Type::SINT},
+      {{Token::KEYWORD_SIGNED}, Type::SINT},
+      {{Token::KEYWORD_INT, Token::KEYWORD_SIGNED}, Type::SINT},
+      {{Token::KEYWORD_UNSIGNED}, Type::UINT},
+      {{Token::KEYWORD_INT, Token::KEYWORD_UNSIGNED}, Type::UINT},
+
+      {{Token::KEYWORD_LONG}, Type::SLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_SIGNED}, Type::SLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_SIGNED, Token::KEYWORD_INT},
+       Type::SLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_UNSIGNED}, Type::ULONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_UNSIGNED, Token::KEYWORD_INT},
+       Type::ULONG},
+
+      {{Token::KEYWORD_LONG, Token::KEYWORD_LONG}, Type::SLONGLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_LONG, Token::KEYWORD_SIGNED},
+       Type::SLONGLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_LONG, Token::KEYWORD_SIGNED,
+        Token::KEYWORD_INT},
+       Type::SLONGLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_LONG, Token::KEYWORD_UNSIGNED},
+       Type::ULONGLONG},
+      {{Token::KEYWORD_LONG, Token::KEYWORD_LONG, Token::KEYWORD_UNSIGNED,
+        Token::KEYWORD_INT},
+       Type::ULONGLONG},
+  };
+  for (auto &[toks, _] : typeSpecSets) {
+    std::sort(toks.begin(), toks.end());
+  }
+  return std::map<std::vector<Token::Kind>, Type::Kind>(typeSpecSets.begin(),
+                                                        typeSpecSets.end());
+}
+
+static auto typeSpecSets = getTypeSpecSets();
 } // namespace
 
-ASTPtrResult Parser::parsePrimary() {
+ASTPtrResult Parser::parseUnary() {
   Token::Kind tokKind = lex->peekTokenKind();
+  AST::Ptr res;
   switch (tokKind) {
   case Token::PUNCT_PARENO: {
+    lex->dropToken();
     auto ex = parseExpression();
     if (!ex) {
       return error("Expected expresssion");
@@ -164,20 +223,23 @@ ASTPtrResult Parser::parsePrimary() {
     if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
       return error("Expected closing paren");
     }
-    return ex;
+    res = ex.moveRes();
+    break;
   }
   case Token::IDENTIFIER: {
-    return new VarAST(std::string_view(lex->nextToken()));
+    res = std::make_unique<VarAST>(std::string_view(lex->nextToken()));
+    break;
   }
   case Token::LITERAL_NUM:
-    return parseLiteralNum();
+    res = parseLiteralNum();
+    break;
   default: {
     AST::Kind unopKind = tokenUnopKind(tokKind);
     if (unopKind == AST::EMPTY) {
       return nop();
     }
     lex->dropToken();
-    auto subExpr = parsePrimary();
+    auto subExpr = parseUnary();
     if (!subExpr) {
       return error("Expected expression after unary operator");
     }
@@ -187,13 +249,15 @@ ASTPtrResult Parser::parsePrimary() {
         s->setAddrTaken(true);
       }
     }
-    return new UnopAST(unopKind, subExpr);
+    res = std::make_unique<UnopAST>(unopKind, subExpr);
+    break;
   }
   }
+  return parsePostfix(std::move(res));
 }
 
 ASTPtrResult Parser::parseExpression(int prec) {
-  auto lhs = parsePrimary();
+  auto lhs = parseUnary();
   if (!lhs) {
     return nop();
   }
@@ -317,7 +381,7 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
       auto func = make_counted<FuncType>();
       if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
         do {
-          auto spec = parseDeclSpec<true, true, false>();
+          auto spec = parseDeclSpec(true, true, false);
           if (!spec) {
             return error("Expected decl specifiers");
           }
@@ -325,7 +389,7 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
           if (!decl) {
             return error("Expected declarator");
           }
-          decl->spliceEnd(DeclaratorAST(spec->createType(), nullptr));
+          decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
           func->addNamedParam(decl->ident, std::move(decl->type));
         } while (lex->matchNextToken(Token::PUNCT_COMMA));
       }
@@ -372,7 +436,7 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
   case Token::PUNCT_STAR: {
     lex->dropToken();
     auto quali = Type::Qualifier();
-    auto spec = parseDeclSpec<false, true, false>();
+    auto spec = parseDeclSpec(false, true, false);
     if (spec) {
       quali = spec->qualifier;
     } else if (!spec.isNop()) {
@@ -392,7 +456,7 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
 }
 
 ASTPtrResult Parser::parseDeclaration() {
-  auto spec = parseDeclSpec();
+  auto spec = parseDeclSpec(true, true, true);
   if (spec.isNop()) {
     return nop();
   }
@@ -400,12 +464,11 @@ ASTPtrResult Parser::parseDeclaration() {
     return error("Expected declaration specifiers");
   }
 
-  CountedPtr<Type> type = spec->createType();
   auto decl = parseDeclarator(false);
   if (!decl) {
     return error("Expected valid declarator");
   }
-  decl->spliceEnd(DeclaratorAST(type, nullptr));
+  decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
 
   if (nextIsDeclarationList()) {
     // Parsing function definition
@@ -456,7 +519,7 @@ ASTPtrResult Parser::parseDeclaration() {
     if (!decl) {
       return error("Expected valid declarator");
     }
-    decl->spliceEnd(DeclaratorAST(type, nullptr));
+    decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
   }
 
   if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
@@ -559,4 +622,230 @@ bool Parser::nextIsDeclarationList() {
     return true;
   }
 }
+
+ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
+  bool isUnion = false;
+  switch (lex->peekTokenKind()) {
+  case Token::KEYWORD_UNION:
+    isUnion = true;
+  case Token::KEYWORD_STRUCT:
+    break;
+  default:
+    return nop();
+  }
+  lex->dropToken();
+  std::string_view name;
+  if (lex->matchPeekToken(Token::IDENTIFIER)) {
+    name = lex->nextToken();
+  }
+  auto res = make_counted<StructType>(isUnion, name);
+  if (!lex->matchNextToken(Token::PUNCT_CURLYO)) {
+    if (name.empty()) {
+      return error("Expected identifier or struct declaration list");
+    }
+    return res;
+  }
+
+  while (true) {
+    auto spec = parseDeclSpec(true, true, false);
+    if (spec.isNop()) {
+      break;
+    } else if (!spec) {
+      return error("Expected declaration specifiers");
+    }
+    do {
+      auto decl = parseDeclarator(false);
+      if (!decl) {
+        return error("Expected declarator");
+      }
+      decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
+      res->addNamedMember(decl->ident, std::move(decl->type));
+    } while (lex->matchNextToken(Token::PUNCT_COMMA));
+    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
+      return error("Expected semicolon after member declaration");
+    }
+  }
+
+  if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {
+    return error("Expected closing curly");
+  }
+  return res;
+}
+
+ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
+  AST::Ptr res;
+  Token::Kind tokKind = lex->peekTokenKind();
+  switch (tokKind) {
+  case Token::PUNCT_PARENO: {
+    lex->dropToken();
+    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
+      return error("Expected closing paren for function call");
+    }
+    break;
+  }
+  case Token::PUNCT_SQUAREO: {
+    lex->dropToken();
+    auto expr = parseExpression();
+    if (!expr) {
+      return error("Expected expression for array access");
+    }
+    if (!lex->matchNextToken(Token::PUNCT_SQUAREC)) {
+      return error("Expected closing bracket for array access");
+    }
+    res = std::make_unique<ArrAccessAST>(std::move(base), expr.moveRes());
+    break;
+  }
+  case Token::PUNCT_DOT:
+  case Token::PUNCT_ARROW: {
+    lex->dropToken();
+    if (!lex->matchPeekToken(Token::IDENTIFIER)) {
+      return error("Expected identifer for member access");
+    }
+    res = std::make_unique<MemberAccessAST>(tokKind == Token::PUNCT_ARROW
+                                                ? AST::ACCESS_MEMBER_DEREF
+                                                : AST::ACCESS_MEMBER,
+                                            std::move(base), lex->nextToken());
+    break;
+  }
+  case Token::PUNCT_PLUSPLUS:
+  case Token::PUNCT_MINUSMINUS: {
+    lex->dropToken();
+    res = std::make_unique<UnopAST>(
+        tokKind == Token::PUNCT_PLUSPLUS ? AST::INC_POST : AST::DEC_POST,
+        std::move(base));
+    break;
+  }
+  default:
+    return base;
+  }
+  return parsePostfix(std::move(res));
+}
+
+ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
+                                          bool enableTypeQuali,
+                                          bool enableStorageSpec) {
+  bool isNop = true;
+  Type::Qualifier qualifier = Type::Qualifier();
+  Symbol::Kind storageKind = Symbol::EMPTY;
+  CountedPtr<Type> type;
+  std::vector<Token::Kind> typeSpecs;
+  int qConst = 0;
+  int qVolatile = 0;
+  int qRestrict = 0;
+  std::vector<Token::Kind> storageSpecs;
+  while (true) {
+    Token::Kind kind = lex->peekTokenKind();
+    switch (kind) {
+    default:
+      goto done;
+    case Token::KEYWORD_VOID:
+    case Token::KEYWORD_CHAR:
+    case Token::KEYWORD_SHORT:
+    case Token::KEYWORD_INT:
+    case Token::KEYWORD_LONG:
+    case Token::KEYWORD_UNSIGNED:
+    case Token::KEYWORD_SIGNED:
+      if (enableTypeSpec) {
+        typeSpecs.push_back(kind);
+        lex->dropToken();
+        break;
+      } else {
+        goto done;
+      }
+    case Token::KEYWORD_STRUCT:
+    case Token::KEYWORD_UNION:
+      if (enableTypeSpec) {
+        if (type) {
+          return error("Specified multiple types");
+        }
+        auto tyRes = parseStruct();
+        if (!tyRes) {
+          return error("Expected struct/union");
+        }
+        type = tyRes.moveRes();
+        break;
+      } else {
+        goto done;
+      }
+    case Token::KEYWORD_CONST:
+      ++qConst;
+      goto qualiCont;
+    case Token::KEYWORD_RESTRICT:
+      ++qRestrict;
+      goto qualiCont;
+    case Token::KEYWORD_VOLATILE:
+      ++qVolatile;
+    qualiCont:
+      if (enableTypeQuali) {
+        lex->dropToken();
+        break;
+      } else {
+        goto done;
+      }
+    case Token::KEYWORD_TYPEDEF:
+    case Token::KEYWORD_EXTERN:
+    case Token::KEYWORD_STATIC:
+    case Token::KEYWORD_AUTO:
+    case Token::KEYWORD_REGISTER:
+      if (enableStorageSpec) {
+        storageSpecs.push_back(kind);
+        lex->dropToken();
+        break;
+      } else {
+        goto done;
+      }
+    }
+    isNop = false;
+  }
+done:
+  if (isNop) {
+    return nop();
+  }
+  if (enableStorageSpec) {
+    if (storageSpecs.size() == 0) {
+      storageKind = Symbol::EMPTY;
+    } else if (storageSpecs.size() == 1) {
+      switch (storageSpecs[0]) {
+      default:
+        break;
+      case Token::KEYWORD_TYPEDEF:
+        storageKind = Symbol::TYPE;
+        break;
+      case Token::KEYWORD_EXTERN:
+        storageKind = Symbol::EXTERN;
+        break;
+      case Token::KEYWORD_STATIC:
+        storageKind = Symbol::STATIC;
+        break;
+      case Token::KEYWORD_AUTO:
+        storageKind = Symbol::AUTO;
+        break;
+      case Token::KEYWORD_REGISTER:
+        storageKind = Symbol::REGISTER;
+        break;
+      }
+    } else {
+      return error("Multiple storage specifiers not allowed");
+    }
+  }
+  if (enableTypeQuali) {
+    qualifier = Type::Qualifier(qConst, qVolatile, qRestrict);
+  }
+  if (enableTypeSpec) {
+    if (type) {
+      if (typeSpecs.size() != 0) {
+        return error("Specified type and type specifier");
+      }
+    } else {
+      std::sort(typeSpecs.begin(), typeSpecs.end());
+      auto it = typeSpecSets.find(typeSpecs);
+      if (it == typeSpecSets.end()) {
+        return error("Invalid type specifier set");
+      }
+      type = BasicType::create(it->second, qualifier);
+    }
+  }
+  return DeclSpec(storageKind, std::move(type), qualifier);
+}
+
 } // namespace c

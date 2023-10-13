@@ -1,4 +1,5 @@
 #include "c/ASTPrinter.h"
+#include "c/AST.h"
 #include "c/ASTVisitor.h"
 #include "c/Type.h"
 
@@ -27,6 +28,30 @@ public:
     std::cout << ",";
     dispatch(ast.getRHS());
     std::cout << ")";
+  }
+
+  void visitMemberAccess(MemberAccessAST &ast) {
+    if (ast.getKind() == AST::ACCESS_MEMBER_DEREF) {
+      std::cout << "MemberAccessDeref(";
+    } else {
+      std::cout << "MemberAccess(";
+    }
+    dispatch(*ast.child);
+    std::cout << ",";
+    std::cout << ast.ident;
+    std::cout << ")";
+  }
+
+  void visitArrAccess(ArrAccessAST &ast) {
+    std::cout << "ArrAccess(";
+    dispatch(*ast.arr);
+    std::cout << ",";
+    dispatch(*ast.expr);
+    std::cout << ")";
+  }
+
+  void visitFunctionCall(FunctionCallAST &ast) {
+    std::cout << "FunctionCall()";
   }
 
   void visitCompoundSt(CompoundStAST &ast) {

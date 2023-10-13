@@ -902,9 +902,11 @@ public:
   void genEmit(InstrPats &pats, CodeBuilder &code, SymbolTable &sym) {
     unsigned instrNum = 0;
     for (auto &instr : pats.instrs) {
+      code.println("auto& e_insertpoint = m_root.getNextNode();");
       code.println(std::format("Instr *e_instr_{} = new Instr({});", instrNum,
                                instr.genInstrKind(sym)));
-      code.println(std::format("m_root.insertPrev(e_instr_{});", instrNum));
+      code.println(
+          std::format("e_insertpoint.insertPrev(e_instr_{});", instrNum));
       code.println(std::format("e_instr_{}->allocateOperands({});", instrNum,
                                instr.operands.size()));
       for (auto &op : instr.operands) {
@@ -1025,6 +1027,17 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
     code.println(std::format("{},", rec->name));
   }
   code.endBlockSemicolon();
+
+  code.startFunction("constexpr const char* instrKindName(unsigned kind)");
+  code.startBlock("switch(kind)");
+  for (auto rec : instrRecs) {
+    code.println(std::format("case {}:", rec->name));
+    code.println(std::format("return \"{}\";", rec->name));
+  }
+  code.endBlock();
+  code.println("return nullptr;");
+  code.endBlock();
+
   code.startBlock("enum RegClassKind");
   for (auto rec : regClassRecs) {
     code.println(std::format("{},", rec->name));

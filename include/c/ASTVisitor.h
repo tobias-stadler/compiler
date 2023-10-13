@@ -63,6 +63,8 @@ public:
     case AST::DEREF:
     case AST::BIT_NOT:
     case AST::LOG_NOT:
+    case AST::PLUS:
+    case AST::MINUS:
       VISIT_DELEGATE(Unop);
       break;
     case AST::VAR:
@@ -70,6 +72,15 @@ public:
       break;
     case AST::NUM:
       VISIT_DELEGATE(Num);
+      break;
+    case AST::ACCESS_MEMBER:
+      VISIT_DELEGATE(MemberAccess);
+      break;
+    case AST::ACCESS_ARRAY:
+      VISIT_DELEGATE(ArrAccess);
+      break;
+    case AST::FUNCTION_CALL:
+      VISIT_DELEGATE(FunctionCall);
       break;
     case AST::ST_IF:
       VISIT_DELEGATE(IfSt);
@@ -110,6 +121,9 @@ protected:
   void visitDeclaration(DeclarationAST &) {}
   void visitFunctionDefinition(FunctionDefinitionAST &) {}
   void visitTranslationUnit(TranslationUnitAST &) {}
+  void visitMemberAccess(MemberAccessAST &) {}
+  void visitArrAccess(ArrAccessAST &) {}
+  void visitFunctionCall(FunctionCallAST &) {}
 };
 
 } // namespace c

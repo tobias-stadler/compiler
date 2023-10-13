@@ -9,7 +9,7 @@ let ArithImmPat = Template {
 ir_pat {
   match {
     CONST_INT def(%2,_) #imm;
-    IN def(%1,i32) %2 %3;
+    IN def(%1,i32) %3 %2;
   }
   if {
     $TCInt::canTrunc<12>($ #imm $.imm32())$
@@ -21,7 +21,7 @@ ir_pat {
 ir_pat {
   match {
     CONST_INT def(%2,_) #imm;
-    IN def(%1,i32) %3 %2;
+    IN def(%1,i32) %2 %3;
   }
   if {
     $TCInt::canTrunc<12>($ #imm $.imm32())$

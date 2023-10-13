@@ -211,20 +211,24 @@ public:
       break;
     }
     case AST::LOG_NOT: {
-      dispatch(ast.getSubExpression());
-      sema.expectRValue();
-      sema.expectTypeKind(Type::BOOL);
-      ir->emitNot(*tmpOperand);
+      ir->emitNot(*genBoolExpression(ast.getSubExpression()));
       tmpOperand = &ir.getDef();
       break;
     }
     case AST::BIT_NOT: {
       dispatch(ast.getSubExpression());
-      sema.expectRValue();
-      sema.expectTypeKind(
-          ExpressionSemantics::intPromotion(sema.getType()->getKind()));
+      sema.promoteInt();
       ir->emitNot(*tmpOperand);
       tmpOperand = &ir.getDef();
+      break;
+    }
+    case AST::PLUS: {
+      genUsualArithUnop(ast);
+      break;
+    }
+    case AST::MINUS: {
+      ir->emitNeg(*genUsualArithUnop(ast));
+      tmpOperand = &ir->getDef();
       break;
     }
     default:
@@ -259,7 +263,7 @@ public:
     case AST::BIT_AND:
     case AST::BIT_OR:
     case AST::BIT_XOR: {
-      auto [lhs, rhs] = usualArithBinop(ast);
+      auto [lhs, rhs] = genUsualArithBinop(ast);
       switch (ast.getKind()) {
       case AST::ADD:
         ir->emitAdd(*lhs, *rhs);
@@ -286,13 +290,37 @@ public:
       sema.setCategory(ExpressionSemantics::RVALUE);
       break;
     }
+    case AST::LSHIFT:
+    case AST::RSHIFT: {
+      dispatch(ast.getRHS());
+      sema.promoteInt();
+      auto rhs = saveExprState();
+
+      dispatch(ast.getLHS());
+      sema.promoteInt();
+      if (rhs.tmpOperand->ssaDefType() != tmpOperand->ssaDefType()) {
+        ir->emitExtOrTrunc(tmpOperand->ssaDefType(), *rhs.tmpOperand);
+        rhs.tmpOperand = &ir.getDef();
+      }
+      if (ast.getKind() == AST::LSHIFT) {
+        ir->emitShiftLeft(*tmpOperand, *rhs.tmpOperand);
+      } else {
+        if (Type::isSigned(sema.getType()->getKind())) {
+          ir->emitShiftRightArith(*tmpOperand, *rhs.tmpOperand);
+        } else {
+          ir->emitShiftRightLogical(*tmpOperand, *rhs.tmpOperand);
+        }
+      }
+      sema.setCategory(ExpressionSemantics::RVALUE);
+      break;
+    }
     case AST::EQ:
     case AST::NEQ:
     case AST::LT:
     case AST::LTE:
     case AST::GT:
     case AST::GTE: {
-      auto [lhs, rhs] = usualArithBinop(ast);
+      auto [lhs, rhs] = genUsualArithBinop(ast);
       ir->emitCmp(
           irBrCond(ast.getKind(), Type::isSigned(sema.getType()->getKind())),
           *lhs, *rhs);
@@ -306,7 +334,13 @@ public:
     }
   }
 
-  std::pair<Operand *, Operand *> usualArithBinop(BinopAST &ast) {
+  Operand *genUsualArithUnop(UnopAST &ast) {
+    dispatch(ast.getSubExpression());
+    sema.promoteInt();
+    return tmpOperand;
+  }
+
+  std::pair<Operand *, Operand *> genUsualArithBinop(BinopAST &ast) {
     dispatch(ast.getLHS());
     sema.expectRValue();
     auto lhs = saveExprState();
@@ -323,7 +357,7 @@ public:
     return {tmpOperand, rhs.tmpOperand};
   }
 
-  Operand *boolExpression(AST &expr) {
+  Operand *genBoolExpression(AST &expr) {
     dispatch(expr);
     sema.expectRValue();
     sema.expectTypeKind(Type::BOOL);
@@ -335,7 +369,7 @@ public:
     Block *falseBlock = ast.hasElseStatement() ? &ir.createBlock() : nullptr;
     Block &exitBlock = ir.createBlock();
 
-    Operand *condExpr = boolExpression(ast.getExpression());
+    Operand *condExpr = genBoolExpression(ast.getExpression());
     ir->emitBrCond(*condExpr, trueBlock, falseBlock ? *falseBlock : exitBlock);
 
     SSABuilder::sealBlock(trueBlock);
@@ -361,7 +395,7 @@ public:
     ir->emitBr(hdrBlock);
 
     ir.setBlock(hdrBlock);
-    Operand *condExpr = boolExpression(ast.getExpression());
+    Operand *condExpr = genBoolExpression(ast.getExpression());
     ir->emitBrCond(*condExpr, loopBlock, exitBlock);
     SSABuilder::sealBlock(loopBlock);
     ir.setBlock(loopBlock);
@@ -453,4 +487,4 @@ std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, SymbolTable &sym) {
   gen.dispatch(ast);
   return gen.ir.endProgram();
 }
-};
+}; // namespace c

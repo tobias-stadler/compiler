@@ -89,6 +89,7 @@ public:
 
   Instr &emitConstInt(SSAType &type, int32_t val) {
     // TODO: assert that type can construct constant
+    assert(type.getKind() == SSAType::INT);
     Instr *i = new Instr(Instr::CONST_INT);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
@@ -106,6 +107,16 @@ public:
     i->emplaceOperand<Operand::SSA_USE>(rhs);
     emit(i);
     return *i;
+  }
+
+  Instr &emitShiftLeft(Operand &lhs, Operand &rhs) {
+    return emitBinop(Instr::SL_L, lhs, rhs);
+  }
+  Instr &emitShiftRightLogical(Operand &lhs, Operand &rhs) {
+    return emitBinop(Instr::SR_L, lhs, rhs);
+  }
+  Instr &emitShiftRightArith(Operand &lhs, Operand &rhs) {
+    return emitBinop(Instr::SR_A, lhs, rhs);
   }
 
   PhiInstrPtr buildPhi(SSAType &type) {
@@ -227,7 +238,7 @@ public:
 
   Instr &emitNot(Operand &val) {
     // TODO: arbitrary int
-    Instr &i = emitConstInt(IntSSAType::get(1), 1);
+    Instr &i = emitConstInt(val.ssaDefType(), -1);
     return emitXor(val, i.getDef());
   }
 
@@ -254,8 +265,7 @@ public:
     return emitBinop(Instr::SUB, lhs, rhs);
   }
   Instr &emitMul(Operand &lhs, Operand &rhs, bool isSigned) {
-    return emitBinop(isSigned ? Instr::MUL_S : Instr::MUL_U, lhs,
-                     rhs);
+    return emitBinop(isSigned ? Instr::MUL_S : Instr::MUL_U, lhs, rhs);
   }
   Instr &emitAnd(Operand &lhs, Operand &rhs) {
     return emitBinop(Instr::AND, lhs, rhs);

@@ -107,6 +107,7 @@ public:
     PUNCT_GTGTEQ,
     PUNCT_ARROW,
     PUNCT_END,
+    TOKEN_END,
   };
 
   constexpr Token(Kind kind = EMPTY, const char *text = nullptr, size_t len = 0)
@@ -244,7 +245,7 @@ public:
     return a;
   }
 
-  explicit operator std::string_view() const {
+  operator std::string_view() const {
     if (text == nullptr)
       return {};
     return {text, textLen};

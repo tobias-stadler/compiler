@@ -129,16 +129,12 @@ private:
 class DeclSpec {
 public:
   DeclSpec() = default;
-  DeclSpec(Symbol::Kind symbolKind, Type::Kind typeKind,
+  DeclSpec(Symbol::Kind symbolKind, CountedPtr<Type> type,
            Type::Qualifier qualifier)
-      : symbolKind(symbolKind), typeKind(typeKind), qualifier(qualifier) {}
+      : symbolKind(symbolKind), type(std::move(type)), qualifier(qualifier) {}
   Symbol::Kind symbolKind = Symbol::EMPTY;
-  Type::Kind typeKind = Type::EMPTY;
+  CountedPtr<Type> type;
   Type::Qualifier qualifier;
-
-  CountedPtr<BasicType> createType() {
-    return BasicType::create(typeKind, qualifier);
-  }
 };
 
 inline Symbol *Scope::declareSymbol(IdentId identId, Symbol symbol) {
@@ -156,4 +152,4 @@ inline Symbol *Scope::getSymbol(IdentId identId) {
   }
   return &it->second;
 }
-};
+}; // namespace c

@@ -29,6 +29,8 @@ public:
     ASSIGN_XOR,
     ASSIGN_LSHIFT,
     ASSIGN_RSHIFT,
+    PLUS,
+    MINUS,
     ADD,
     SUB,
     MUL,
@@ -48,6 +50,10 @@ public:
     DEC_PRE,
     DEC_POST,
     DEREF,
+    ACCESS_MEMBER_DEREF,
+    ACCESS_MEMBER,
+    ACCESS_ARRAY,
+    FUNCTION_CALL,
     ADDR,
     VAR,
     NUM,
@@ -162,9 +168,20 @@ public:
       return "FunctionDefinition";
     case TRANSLATION_UNIT:
       return "TranslationUnit";
-    default:
-      return "unnamed";
+    case ACCESS_MEMBER_DEREF:
+      return "DerefMemberAccess";
+    case ACCESS_MEMBER:
+      return "MemberAccess";
+    case ACCESS_ARRAY:
+      return "ArrAccess";
+    case FUNCTION_CALL:
+      return "FunctionCall";
+    case PLUS:
+      return "Plus";
+    case MINUS:
+      return "Minus";
     }
+    return "unnamed";
   }
 
   AST(Kind kind) : kind(kind) {}
@@ -200,6 +217,27 @@ class NumAST : public AST {
 public:
   int64_t num;
   NumAST(uint64_t num) : AST(NUM), num(num) {}
+};
+
+class MemberAccessAST : public AST {
+public:
+  MemberAccessAST(Kind kind, Ptr child, std::string_view ident)
+      : AST(kind), child(std::move(child)), ident(ident) {}
+  std::string_view ident;
+  Ptr child;
+};
+
+class ArrAccessAST : public AST {
+public:
+  ArrAccessAST(Ptr arr, Ptr expr)
+      : AST(ACCESS_ARRAY), arr(std::move(arr)), expr(std::move(expr)) {}
+  Ptr arr;
+  Ptr expr;
+};
+
+class FunctionCallAST : public AST {
+public:
+  FunctionCallAST() : AST(FUNCTION_CALL) {}
 };
 
 class VarAST : public AST {

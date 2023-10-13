@@ -136,6 +136,11 @@ public:
     type = make_counted<PtrType>(std::move(type));
   }
 
+  void promoteInt() {
+    expectRValue();
+    expectTypeKind(intPromotion(type->getKind()));
+  }
+
   void setCategory(Category c) { category = c; }
   void setType(CountedPtr<Type> ty) { type = std::move(ty); }
 
