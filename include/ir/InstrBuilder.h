@@ -175,6 +175,19 @@ public:
     }
   }
 
+  Instr &emitReturn(Operand &val) {
+    Instr *i = new Instr(Instr::RET);
+    i->allocateOperands(1);
+    i->emplaceOperand<Operand::SSA_USE>(val);
+    emit(i);
+    return *i;
+  }
+  Instr &emitReturn() {
+    Instr *i = new Instr(Instr::RET);
+    emit(i);
+    return *i;
+  }
+
   Instr &emitAlloca(SSAType &eleType, unsigned numEle) {
     Instr *i = new Instr(Instr::ALLOCA);
     i->allocateOperands(3);

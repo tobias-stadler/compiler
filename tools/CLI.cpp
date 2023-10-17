@@ -51,7 +51,9 @@ int main(int argc, char *argv[]) {
   auto prog = IRGenAST(**ast, sym);
   auto &func = *prog->functions[0];
 
+  riscv::Arch arch;
   IRPipeline<Function> pipeline;
+
   /*
   pipeline.addLazyPass(std::make_unique<PrintIRPass>());
   pipeline.addLazyPass(std::make_unique<DominatorTreePass>());
@@ -64,7 +66,7 @@ int main(int argc, char *argv[]) {
 
   riscv::InstrSelector isel;
   pipeline.addPass(std::make_unique<InstrSelectorPass>(isel));
-  pipeline.addPass(std::make_unique<PrintIRPass>());
+  pipeline.addPass(std::make_unique<PrintIRPass>(&arch));
   pipeline.run(func);
 
   /*

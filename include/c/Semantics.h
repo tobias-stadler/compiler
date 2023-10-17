@@ -125,7 +125,7 @@ public:
 
   void deref() {
     expectRValue();
-    expectTypeKind(Type::PTR);
+    expectTypeKindImplicitConv(Type::PTR);
     category = LVALUE_MEM;
     type = static_cast<PtrType *>(type.get())->getBaseType();
   }
@@ -138,7 +138,7 @@ public:
 
   void promoteInt() {
     expectRValue();
-    expectTypeKind(intPromotion(type->getKind()));
+    expectTypeKindImplicitConv(intPromotion(type->getKind()));
   }
 
   void setCategory(Category c) { category = c; }
@@ -168,23 +168,42 @@ public:
     error(ERROR_EXPECT_RVALUE);
   }
 
-  void expectTypeKind(Type::Kind expectedKind) {
+  bool implicitConv(Type::Kind expectedKind) {
     assert(type);
-    if (type->getKind() == expectedKind) {
-      return;
-    }
     if (expectedKind == Type::BOOL) {
       if (Type::isInteger(type->getKind()) &&
           handler->semanticConvBool() == SUCCESS) {
         type = BasicType::create(Type::BOOL);
-        return;
+        return true;
       }
     } else if (Type::isInteger(expectedKind) &&
                Type::isInteger(type->getKind())) {
       if (handler->semanticConvInt(expectedKind) == SUCCESS) {
         type = BasicType::create(expectedKind);
-        return;
+        return true;
       }
+    }
+    return false;
+  }
+
+  void expectTypeImplicitConv(Type &expectedType) {
+    assert(type);
+    if (expectedType == *type) {
+      return;
+    }
+    if (implicitConv(expectedType.getKind())) {
+      return;
+    }
+    error(ERROR_EXPECT_TYPE);
+  }
+
+  void expectTypeKindImplicitConv(Type::Kind expectedKind) {
+    assert(type);
+    if (type->getKind() == expectedKind) {
+      return;
+    }
+    if (implicitConv(expectedKind)) {
+      return;
     }
     error(ERROR_EXPECT_TYPE);
   }

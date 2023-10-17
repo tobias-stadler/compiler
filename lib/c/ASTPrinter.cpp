@@ -77,9 +77,19 @@ public:
 
   void visitWhileSt(WhileStAST &ast) {
     std::cout << "while(";
-    dispatch(ast.getExpression());
+    dispatch(ast.expr.get());
     std::cout << ")";
-    dispatch(ast.getStatement());
+    dispatch(ast.st.get());
+  }
+  void visitForSt(ForStAST &ast) {
+    std::cout << "for(";
+    dispatch(ast.initClause.get());
+    std::cout << "; ";
+    dispatch(ast.exprCond.get());
+    std::cout << "; ";
+    dispatch(ast.exprIter.get());
+    std::cout << ")";
+    dispatch(ast.st.get());
   }
 
   void visitDeclarator(DeclaratorAST &ast) {
@@ -182,12 +192,22 @@ public:
       std::cout << "array";
       break;
     case Type::STRUCT:
-      std::cout << "struct";
+      printStructType(static_cast<StructType &>(*type));
       break;
     default:
       std::cout << "unnamed";
       break;
     }
+  }
+
+  void printStructType(StructType &type) {
+    std::cout << "struct {";
+    for (auto &subType : type.members) {
+      std::cout << "\n";
+      printType(subType.get());
+      std::cout << ";";
+    }
+    std::cout << "}";
   }
 };
 } // namespace

@@ -279,7 +279,11 @@ ASTPtrResult Parser::parseExpression(int prec) {
 }
 
 ASTPtrResult Parser::parseStatement() {
-  switch (lex->peekTokenKind()) {
+  Token::Kind tokKind = lex->peekTokenKind();
+  switch (tokKind) {
+  case Token::PUNCT_SEMICOLON: {
+    return error("Stray semicolon");
+  }
   case Token::PUNCT_CURLYO: {
     return parseCompoundStatement();
   }
@@ -311,11 +315,11 @@ ASTPtrResult Parser::parseStatement() {
   case Token::KEYWORD_WHILE: {
     lex->dropToken();
     if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
-      return error("Expected opening paren after while keyword");
+      return error("Expected opening paren in while loop");
     }
     auto expr = parseExpression();
     if (!expr) {
-      return error("Expected expression after while keyword");
+      return error("Expected expression in while loop");
     }
     if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
       return error("Expected closing paren after while expression");
@@ -326,10 +330,83 @@ ASTPtrResult Parser::parseStatement() {
     }
     return new WhileStAST(expr, st);
   }
+  case Token::KEYWORD_FOR: {
+    lex->dropToken();
+    if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
+      return error("Expected opening paren after for keyword");
+    }
+    auto initClauseRes = parseDeclaration();
+    AST::Ptr initClause = nullptr;
+    if (initClauseRes.isNop()) {
+      initClauseRes = parseExpression();
+      if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
+        return error("Expected semicolon after init expression in for loop");
+      }
+    }
+    if (initClauseRes) {
+      initClause = initClauseRes.moveRes();
+    } else if (!initClauseRes.isNop()) {
+      return error("Expected expression or declaration in for loop");
+    }
+
+    auto exprCondRes = parseExpression();
+    AST::Ptr exprCond = nullptr;
+    if (exprCondRes) {
+      exprCond = exprCondRes.moveRes();
+    } else if (!exprCondRes.isNop()) {
+      return error("Expected condition expression in for loop");
+    }
+    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
+      return error("Expected semicolon after condition expression in for loop");
+    }
+    auto exprIterRes = parseExpression();
+    AST::Ptr exprIter = nullptr;
+    if (exprIterRes) {
+      exprIter = exprIterRes.moveRes();
+    } else if (!exprIterRes.isNop()) {
+      return error("Expected iter expression in for loop");
+    }
+    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
+      return error("Expected closing paren after for header");
+    }
+    auto stRes = parseStatement();
+    if (!stRes) {
+      return error("Expected statment after for");
+    }
+    return std::make_unique<ForStAST>(std::move(initClause),
+                                      std::move(exprCond), std::move(exprIter),
+                                      stRes.moveRes());
+  }
+  case Token::KEYWORD_CONTINUE:
+  case Token::KEYWORD_BREAK: {
+    lex->dropToken();
+    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
+      return error("Expected semicolon after loop control statement");
+    }
+    return std::make_unique<LoopCtrlStAST>(
+        tokKind == Token::KEYWORD_CONTINUE ? AST::ST_CONTINUE : AST::ST_BREAK);
+  }
+
+  case Token::KEYWORD_RETURN: {
+    lex->dropToken();
+    auto exprRes = parseExpression();
+    AST::Ptr expr = nullptr;
+    if (exprRes) {
+      expr = exprRes.moveRes();
+    } else if (!exprRes.isNop()) {
+      return error("Expected expression in return statement");
+    }
+    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
+      return error("Expected semicolon after return statement");
+    }
+    return std::make_unique<ReturnStAST>(std::move(expr));
+  }
   default: {
     auto st = parseExpression();
-    if (!st) {
+    if (st.isNop()) {
       return nop();
+    } else if (!st) {
+      return error("Expected expresssion statement");
     }
     if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
       return error("Expected semicolon after expression statement");

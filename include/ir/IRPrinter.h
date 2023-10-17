@@ -1,4 +1,6 @@
 #pragma once
+
+#include "ir/Arch.h"
 #include "ir/IR.h"
 #include "ir/IRPass.h"
 #include "ir/IRVisitor.h"
@@ -29,6 +31,8 @@ class PrintIRVisitor : public IRVisitor<PrintIRVisitor> {
 public:
   static const IRInfoID ID;
 
+  PrintIRVisitor(Arch *arch) : arch(arch) {}
+
   void printNumberedDef(Operand &op);
   void printSSAType(SSAType &type);
 
@@ -40,10 +44,15 @@ protected:
   void visitBlock(Block &block);
   void visitInstr(Instr &instr);
   void visitOperand(Operand &op);
+
   NumberingIRVisitor numbering;
+  Arch *arch;
 };
 
 class PrintIRPass : public IRPass<Function> {
+public:
+  PrintIRPass(Arch *arch = nullptr) : arch(arch), irVisitor(arch) {}
+
   const char *name() { return "PrintIRPass"; }
 
   void advertise(IRInfo<Function> &info) { info.advertise<PrintIRVisitor>(); }
@@ -51,12 +60,12 @@ class PrintIRPass : public IRPass<Function> {
   void invalidate(IRInfo<Function> &) {}
 
   void run(Function &obj, IRInfo<Function> &info) {
-    irVisitor = PrintIRVisitor();
+    irVisitor = PrintIRVisitor(arch);
     irVisitor.dispatch(obj);
     info.publish(irVisitor);
   }
 
+private:
   PrintIRVisitor irVisitor;
+  Arch *arch;
 };
-
-template <class T> void PrintIR(T &ir);

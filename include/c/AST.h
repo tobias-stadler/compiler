@@ -66,6 +66,10 @@ public:
     ST_COMPOUND,
     ST_IF,
     ST_WHILE,
+    ST_FOR,
+    ST_CONTINUE,
+    ST_BREAK,
+    ST_RETURN,
     DECLARATOR,
     DECLARATION,
     FUNCTION_DEFINITION,
@@ -180,6 +184,14 @@ public:
       return "Plus";
     case MINUS:
       return "Minus";
+    case ST_CONTINUE:
+      return "continue";
+    case ST_BREAK:
+      return "break";
+    case ST_RETURN:
+      return "return";
+    case ST_FOR:
+      return "for";
     }
     return "unnamed";
   }
@@ -276,6 +288,26 @@ public:
   AST &getStatement() { return *st; }
 
   Ptr expr, st;
+};
+
+class ForStAST : public AST {
+public:
+  ForStAST(Ptr initClause, Ptr exprCond, Ptr exprIter, Ptr st)
+      : AST(ST_FOR), initClause(std::move(initClause)),
+        exprCond(std::move(exprCond)), exprIter(std::move(exprIter)),
+        st(std::move(st)) {}
+
+  Ptr initClause, exprCond, exprIter, st;
+};
+
+class ReturnStAST : public AST {
+public:
+  ReturnStAST(Ptr expr) : AST(ST_RETURN), expr(std::move(expr)) {}
+  Ptr expr;
+};
+class LoopCtrlStAST : public AST {
+public:
+  LoopCtrlStAST(Kind kind) : AST(kind) {}
 };
 
 class DeclaratorAST : public AST {

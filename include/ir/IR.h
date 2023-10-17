@@ -152,6 +152,10 @@ public:
     }
   }
 
+  friend bool operator==(const BrCond &a, const BrCond &b) {
+    return a.getKind() == b.getKind();
+  }
+
   Kind getKind() const { return kind; }
 
 private:

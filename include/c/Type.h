@@ -58,7 +58,7 @@ public:
   };
   virtual ~Type() = default;
 
-  Kind getKind() { return kind; }
+  Kind getKind() const { return kind; }
 
   static constexpr bool isBasic(Kind kind) {
     return kind > BASIC_START && kind < BASIC_END;
@@ -108,6 +108,10 @@ public:
 
   static constexpr int NUM_BASIC = BASIC_END - BASIC_START - 1;
 
+  friend bool operator==(const Type &a, const Type &b);
+
+  friend bool operator!=(const Type &a, const Type &b) { return !(a == b); }
+
 protected:
   Type(Kind kind, Qualifier qualifier) : kind(kind), qualifier(qualifier) {}
 
@@ -126,6 +130,24 @@ public:
 
   void setBaseType(CountedPtr<Type> newBase) { baseType = std::move(newBase); }
 
+  friend bool operator==(const DerivedType &a, const DerivedType &b) {
+    if (a.getKind() != b.getKind()) {
+      return false;
+    }
+    if (bool(a.baseType) != bool(b.baseType)) {
+      return false;
+    }
+    if (!bool(a.baseType)) {
+      return true;
+    }
+
+    if (*a.baseType == *b.baseType) {
+      return true;
+    }
+
+    return false;
+  }
+
 private:
   CountedPtr<Type> baseType;
 };
@@ -135,6 +157,10 @@ public:
   BasicType(Kind kind = VOID, Qualifier qualifier = Qualifier());
   static CountedPtr<BasicType> create(Kind kind,
                                       Qualifier qualifier = Qualifier());
+
+  friend bool operator==(const BasicType &a, const BasicType &b) {
+    return a.getKind() == b.getKind();
+  }
 };
 
 class PtrType : public DerivedType {
@@ -209,8 +235,9 @@ public:
     return true;
   }
 
+  std::vector<CountedPtr<Type>> members;
+
 private:
   std::string_view name;
-  std::vector<CountedPtr<Type>> members;
   std::unordered_map<std::string_view, size_t> memberIndex;
 };

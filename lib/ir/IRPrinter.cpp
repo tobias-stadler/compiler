@@ -6,12 +6,6 @@
 #include <map>
 #include <optional>
 
-template <class T> void PrintIR(T &ir) { PrintIRVisitor().dispatch(ir); }
-template void PrintIR<Instr>(Instr &);
-template void PrintIR<Block>(Block &);
-template void PrintIR<Function>(Function &);
-template void PrintIR<Program>(Program &);
-
 const IRInfoID NumberingIRVisitor::ID = nullptr;
 const IRInfoID PrintIRVisitor::ID = nullptr;
 
@@ -73,7 +67,10 @@ void PrintIRVisitor::visitBlock(Block &block) {
 }
 
 void PrintIRVisitor::visitInstr(Instr &instr) {
-  std::cout << Instr::kindName(instr.getKind());
+  const char *instrName =
+      arch ? arch->getInstrKindName(instr.getKind()) : nullptr;
+  instrName = instrName ? instrName : Instr::kindName(instr.getKind());
+  std::cout << instrName;
   for (auto &op : instr) {
     std::cout << " ";
     dispatch(op);

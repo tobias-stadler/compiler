@@ -43,7 +43,71 @@ ir_pat {
 }
 }
 
+let CondBrPat = Template {
+ir_pat {
+  match {
+    CMP def(%cmp,i1) IN %lhs %rhs;
+    BR_COND %cmp %b1 %b2;
+  }
+  emit {
+    riscv::OUT %lhs %rhs %b1 %b2;
+  }
+}
+}
+let CondBrPatCommute = Template {
+ir_pat {
+  match {
+    CMP def(%cmp,i1) IN %lhs %rhs;
+    BR_COND %cmp %b1 %b2;
+  }
+  emit {
+    riscv::OUT %rhs %lhs %b1 %b2;
+  }
+}
+}
+
 let isel = InstrSelector {
+
+!CondBrPat {
+  let IN = token {eq}
+  let OUT = token {BEQ}
+}
+!CondBrPat {
+  let IN = token {ne}
+  let OUT = token {BNE}
+}
+!CondBrPat {
+  let IN = token {lt}
+  let OUT = token {BLT}
+}
+!CondBrPat {
+  let IN = token {ltu}
+  let OUT = token {BLTU}
+}
+!CondBrPatCommute {
+  let IN = token {le}
+  let OUT = token {BGE}
+}
+!CondBrPatCommute {
+  let IN = token {leu}
+  let OUT = token {BGEU}
+}
+!CondBrPat {
+  let IN = token {ge}
+  let OUT = token {BGE}
+}
+!CondBrPat {
+  let IN = token {geu}
+  let OUT = token {BGEU}
+}
+!CondBrPatCommute {
+  let IN = token {gt}
+  let OUT = token {BLT}
+}
+!CondBrPatCommute {
+  let IN = token {gtu}
+  let OUT = token {BLTU}
+}
 
 !ArithImmPat {
   let IN = token {ADD}

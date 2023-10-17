@@ -1,3 +1,9 @@
 int main() {
-  int y = 2 ^ ((3 + 5) >> 1);
+
+  short y = 2 ^ ((300 + 500) >> 1);
+  if (y > 0) {
+    return y;
+  } else {
+    return y + 1;
+  }
 }

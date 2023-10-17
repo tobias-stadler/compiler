@@ -82,12 +82,12 @@ public:
     }
   }
 
-  T *get() { return mPtr; }
+  T *get() const { return mPtr; }
 
-  T &operator*() { return *get(); }
-  T *operator->() { return get(); }
+  T &operator*() const { return *get(); }
+  T *operator->() const { return get(); }
 
-  explicit operator bool() { return mPtr; }
+  explicit operator bool() const { return mPtr; }
 
 private:
   T *mPtr = nullptr;

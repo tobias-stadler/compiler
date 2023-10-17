@@ -32,3 +32,18 @@ CountedPtr<BasicType> BasicType::create(Kind kind, Qualifier qualifier) {
   }
   return make_counted<BasicType>(kind, qualifier);
 }
+
+bool operator==(const Type &a, const Type &b) {
+  if (a.kind != b.kind) {
+    return false;
+  }
+  if (Type::isBasic(a.kind)) {
+    return static_cast<const BasicType &>(a) ==
+           static_cast<const BasicType &>(b);
+  }
+  if (a.kind == Type::PTR) {
+    return static_cast<const PtrType &>(a) == static_cast<const PtrType &>(b);
+  }
+
+  return false;
+}

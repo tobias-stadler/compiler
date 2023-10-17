@@ -124,6 +124,8 @@ public:
   }
 
   void visitFunctionDefinition(FunctionDefinitionAST &ast) {
+    funcAST = &ast;
+
     ir.createAndSetFunction();
     storage.setFunction(ir.getFunc());
     ir.createAndSetBlock();
@@ -140,6 +142,8 @@ public:
     sym.popScope();
     sym.popScope();
     SSARenumberTable::destroy(ir.getFunc());
+
+    funcAST = nullptr;
   }
 
   void visitDeclaration(DeclarationAST &ast) {
@@ -158,7 +162,7 @@ public:
         if (initializer) {
           dispatch(initializer.get());
           sema.expectRValue();
-          sema.expectTypeKind(sInfo.symbol->getType()->getKind());
+          sema.expectTypeKindImplicitConv(sInfo.symbol->getType()->getKind());
           auto rhs = saveExprState();
           exprStateFromStorageInfo(sInfo);
           sema.expectLValue();
@@ -182,7 +186,7 @@ public:
     sym.popScope();
   }
 
-  void visit(AST &) {}
+  void visit(AST &ast) { assert(false && "Unsupported"); }
 
   void visitNum(NumAST &ast) {
     ir->emitConstInt(IntSSAType::get(32), ast.num);
@@ -249,7 +253,7 @@ public:
       auto lhs = saveExprState();
 
       restoreExprState(std::move(rhs));
-      sema.expectTypeKind(lhs.sema.getType()->getKind());
+      sema.expectTypeKindImplicitConv(lhs.sema.getType()->getKind());
       rhs = saveExprState();
 
       restoreExprState(std::move(lhs));
@@ -349,18 +353,18 @@ public:
     sema.expectRValue();
     Type::Kind commonTyKind = ExpressionSemantics::usualArithConv(
         lhs.sema.getType()->getKind(), sema.getType()->getKind());
-    sema.expectTypeKind(commonTyKind);
+    sema.expectTypeKindImplicitConv(commonTyKind);
     auto rhs = saveExprState();
 
     restoreExprState(std::move(lhs));
-    sema.expectTypeKind(commonTyKind);
+    sema.expectTypeKindImplicitConv(commonTyKind);
     return {tmpOperand, rhs.tmpOperand};
   }
 
   Operand *genBoolExpression(AST &expr) {
     dispatch(expr);
     sema.expectRValue();
-    sema.expectTypeKind(Type::BOOL);
+    sema.expectTypeKindImplicitConv(Type::BOOL);
     return tmpOperand;
   }
 
@@ -405,6 +409,19 @@ public:
 
     SSABuilder::sealBlock(exitBlock);
     ir.setBlock(exitBlock);
+  }
+
+  void visitReturnSt(ReturnStAST &ast) {
+    assert(funcAST);
+    if (ast.expr) {
+      dispatch(ast.expr.get());
+      sema.expectRValue();
+      assert(funcAST->getType().getBaseType());
+      sema.expectTypeImplicitConv(*funcAST->getType().getBaseType());
+      ir->emitReturn(*tmpOperand);
+    } else {
+      ir->emitReturn();
+    }
   }
 
   void error(std::string_view err) {
@@ -473,6 +490,8 @@ public:
   Operand *tmpOperand = nullptr;
   Symbol *tmpSymbol = nullptr;
   ExpressionSemantics sema;
+
+  FunctionDefinitionAST *funcAST = nullptr;
 
   IRBuilder ir;
   StorageBuilder storage;

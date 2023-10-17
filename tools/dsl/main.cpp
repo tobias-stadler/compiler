@@ -268,6 +268,13 @@ public:
     }
   }
 
+  bool matchIdent(std::string_view ident) {
+    if (tok.kind == Token::IDENT && tok == ident) {
+      return true;
+    }
+    return false;
+  }
+
   bool matchIdentNext(std::string_view ident) {
     if (tok.kind == Token::IDENT && tok == ident) {
       fetchToken();
@@ -714,7 +721,50 @@ public:
       SSA_DEF,
       SSA_USE,
       PLACEHOLDER,
+      COND_EQ,
+      COND_NE,
+      COND_LT,
+      COND_LTU,
+      COND_LE,
+      COND_LEU,
+      COND_GT,
+      COND_GTU,
+      COND_GE,
+      COND_GEU,
     };
+
+    static const char *kindName(Kind kind) {
+      switch (kind) {
+      case SSA_DEF:
+        return "def";
+      case SSA_USE:
+        return "%";
+      case PLACEHOLDER:
+        return "#";
+      case COND_EQ:
+        return "eq";
+      case COND_NE:
+        return "ne";
+      case COND_LT:
+        return "lt";
+      case COND_LTU:
+        return "ltu";
+      case COND_LE:
+        return "le";
+      case COND_LEU:
+        return "leu";
+      case COND_GT:
+        return "gt";
+      case COND_GTU:
+        return "gtu";
+      case COND_GE:
+        return "ge";
+      case COND_GEU:
+        return "geu";
+      }
+      return nullptr;
+    }
+
     Kind kind;
     std::string_view name;
     std::string_view type;
@@ -736,24 +786,44 @@ public:
         if (lex.match(Token::PERCENT)) {
           op.kind = OperandPat::SSA_USE;
           op.name = lex.expectSSAName();
-          continue;
-        }
-        if (lex.match(Token::IDENT)) {
-          lex.expectIdentNext("def");
-          op.kind = OperandPat::SSA_DEF;
-          lex.expectNext(Token::PARENO);
-          op.name = lex.expectSSAName();
-          lex.expectNext(Token::COMMA);
-          op.type = lex.expectNext(Token::IDENT);
-          lex.expectNext(Token::PARENC);
-          continue;
-        }
-        if (lex.match(Token::HASH)) {
+        } else if (lex.match(Token::IDENT)) {
+          if (lex.matchIdentNext("def")) {
+            op.kind = OperandPat::SSA_DEF;
+            lex.expectNext(Token::PARENO);
+            op.name = lex.expectSSAName();
+            lex.expectNext(Token::COMMA);
+            op.type = lex.expectNext(Token::IDENT);
+            lex.expectNext(Token::PARENC);
+          } else if (lex.matchIdentNext("eq")) {
+            op.kind = OperandPat::COND_EQ;
+          } else if (lex.matchIdentNext("ne")) {
+            op.kind = OperandPat::COND_NE;
+          } else if (lex.matchIdentNext("lt")) {
+            op.kind = OperandPat::COND_LT;
+          } else if (lex.matchIdentNext("ltu")) {
+            op.kind = OperandPat::COND_LTU;
+          } else if (lex.matchIdentNext("le")) {
+            op.kind = OperandPat::COND_LE;
+          } else if (lex.matchIdentNext("leu")) {
+            op.kind = OperandPat::COND_LEU;
+          } else if (lex.matchIdentNext("gt")) {
+            op.kind = OperandPat::COND_GT;
+          } else if (lex.matchIdentNext("gtu")) {
+            op.kind = OperandPat::COND_GTU;
+          } else if (lex.matchIdentNext("ge")) {
+            op.kind = OperandPat::COND_GE;
+          } else if (lex.matchIdentNext("geu")) {
+            op.kind = OperandPat::COND_GEU;
+          } else {
+            std::cerr << std::string_view(lex.peek()) << std::endl;
+            error("Invalid ident in operand pattern");
+          }
+        } else if (lex.match(Token::HASH)) {
           op.kind = OperandPat::PLACEHOLDER;
           op.name = lex.expectPlaceholderName();
-          continue;
+        } else {
+          error("Invalid operand pattern");
         }
-        error("Invalid operand pattern");
       }
       return instr;
     }
@@ -866,6 +936,20 @@ public:
           break;
         code.println(std::format("auto &m_ph_{} = {}.getOperand({});", op.name,
                                  instrVar, opNum));
+        break;
+      case OperandPat::COND_EQ:
+      case OperandPat::COND_NE:
+      case OperandPat::COND_LT:
+      case OperandPat::COND_LTU:
+      case OperandPat::COND_LE:
+      case OperandPat::COND_LEU:
+      case OperandPat::COND_GT:
+      case OperandPat::COND_GTU:
+      case OperandPat::COND_GE:
+      case OperandPat::COND_GEU:
+        code.println(std::format(
+            "if({}.getOperand({}).brCond() != BrCond::{}()) return false;",
+            instrVar, opNum, OperandPat::kindName(op.kind)));
         break;
       }
       op.isGenerated = true;
