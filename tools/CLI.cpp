@@ -65,7 +65,9 @@ int main(int argc, char *argv[]) {
   pipeline.addPass(std::make_unique<PrintIRPass>());
 
   riscv::InstrSelector isel;
+  pipeline.addPass(std::make_unique<riscv::PreISelConstraintsPass>());
   pipeline.addPass(std::make_unique<InstrSelectorPass>(isel));
+  pipeline.addPass(std::make_unique<riscv::BranchLoweringPass>());
   pipeline.addPass(std::make_unique<PrintIRPass>(&arch));
   pipeline.run(func);
 

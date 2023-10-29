@@ -342,7 +342,7 @@ public:
     case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
-      assert("Cannot copy SSA Def");
+      assert(false && "Cannot copy SSA Def");
       break;
     case SSA_USE:
       if (o.ssaUse().def) {
@@ -517,6 +517,11 @@ public:
     return contentImm32;
   }
 
+  unsigned reg() const {
+    assert(kind == REG_DEF || kind == REG_USE);
+    return contentReg;
+  }
+
   Instr &getParent() const {
     assert(parent);
     return *parent;
@@ -616,6 +621,7 @@ public:
     EXT_S,
     TRUNC,
     COPY,
+    CONV,
     LOAD,
     STORE,
     ALLOCA,
@@ -689,6 +695,8 @@ public:
       return "EXT_Z";
     case EXT_S:
       return "EXT_S";
+    case CONV:
+      return "CONV";
     case TRUNC:
       return "TRUNC";
     case COPY:
@@ -700,10 +708,7 @@ public:
     case ALLOCA:
       return "ALLOCA";
     }
-    if (kindIsTarget(kind)) {
-      return "T";
-    }
-    return "???";
+    return "UNKNOWNTARGET";
   }
 
   using iterator = Operand *;
@@ -791,6 +796,8 @@ public:
   }
 
   bool isPhi() { return kind == PHI; }
+
+  bool isTarget() { return kindIsTarget(kind); }
 
 private:
   unsigned kind;

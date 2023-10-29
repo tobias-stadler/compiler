@@ -45,7 +45,6 @@ public:
     CODE,
     STR,
     IDENT,
-    NUM,
     PARENO,
     PARENC,
     CURLYO,
@@ -92,7 +91,7 @@ class RecordHdr {
 public:
   std::string_view name;
   std::string_view type;
-  bool isTemplateInstance;
+  bool isTemplateInstance = false;
 };
 
 class TokenSource {
@@ -122,7 +121,6 @@ public:
     }
 
     static const std::regex identRegEx("([a-zA-Z_0-9]+)");
-    static const std::regex numRegEx("([0-9]+)");
     static const std::regex strRegEx("\"(.*)\"");
     static const std::regex codeRegEx("[$]([^$]+)[$]");
 
@@ -130,9 +128,6 @@ public:
     if (std::regex_search(pos, str.end(), m, identRegEx,
                           std::regex_constants::match_continuous)) {
       kind = Token::IDENT;
-    } else if (std::regex_search(pos, str.end(), m, numRegEx,
-                                 std::regex_constants::match_continuous)) {
-      kind = Token::NUM;
     } else if (std::regex_search(pos, str.end(), m, strRegEx,
                                  std::regex_constants::match_continuous)) {
       kind = Token::STR;
@@ -284,12 +279,12 @@ public:
   }
 
   Token expectSSAName() {
-    matchNext(Token::PERCENT);
+    expectNext(Token::PERCENT);
     return expectNext(Token::IDENT);
   }
 
   Token expectPlaceholderName() {
-    matchNext(Token::HASH);
+    expectNext(Token::HASH);
     return expectNext(Token::IDENT);
   }
 
@@ -319,6 +314,24 @@ public:
     }
     res.type = expectNext(Token::IDENT);
     return res;
+  }
+
+  std::vector<Token> expectCode() {
+    std::vector<Token> code;
+    while (true) {
+      switch (peekKind()) {
+      default:
+        return code;
+      case Token::CODE:
+        code.push_back(next());
+        break;
+      case Token::HASH:
+      case Token::PERCENT:
+      case Token::IDENT:
+        code.push_back(next());
+        break;
+      }
+    }
   }
 };
 
@@ -528,7 +541,7 @@ class TemplateRecord : public RecordSpace {
 public:
   static RecordFactory facImpl;
   TemplateRecord() : RecordSpace(facImpl) {}
-  class TokVarRecord : public Record {};
+  class VarRecord : public Record {};
   void parse(Lexer &lex) override {
     while (!lex.matchOrEmpty(Token::CURLYC)) {
       RecordHdr hdr = lex.expectRecordHdr();
@@ -548,7 +561,7 @@ public:
 
 RecordFactory TemplateRecord::facImpl{
     {"template_var",
-     []() { return std::make_unique<TemplateRecord::TokVarRecord>(); }},
+     []() { return std::make_unique<TemplateRecord::VarRecord>(); }},
 };
 
 class InstanceRecord : public RecordSpace {
@@ -720,7 +733,10 @@ public:
     enum Kind {
       SSA_DEF,
       SSA_USE,
-      PLACEHOLDER,
+      RECIDENT_DEF,
+      RECIDENT_USE,
+      OP_PLACEHOLDER,
+      IMM32,
       COND_EQ,
       COND_NE,
       COND_LT,
@@ -739,7 +755,7 @@ public:
         return "def";
       case SSA_USE:
         return "%";
-      case PLACEHOLDER:
+      case OP_PLACEHOLDER:
         return "#";
       case COND_EQ:
         return "eq";
@@ -761,6 +777,11 @@ public:
         return "ge";
       case COND_GEU:
         return "geu";
+      case IMM32:
+        return "imm32";
+      case RECIDENT_DEF:
+      case RECIDENT_USE:
+        break;
       }
       return nullptr;
     }
@@ -768,7 +789,9 @@ public:
     Kind kind;
     std::string_view name;
     std::string_view type;
-    std::string_view code;
+    std::vector<Token> code;
+    std::string_view num;
+    RecordIdent recIdent;
     bool isGenerated = false;
   };
 
@@ -788,11 +811,16 @@ public:
           op.name = lex.expectSSAName();
         } else if (lex.match(Token::IDENT)) {
           if (lex.matchIdentNext("def")) {
-            op.kind = OperandPat::SSA_DEF;
             lex.expectNext(Token::PARENO);
-            op.name = lex.expectSSAName();
-            lex.expectNext(Token::COMMA);
-            op.type = lex.expectNext(Token::IDENT);
+            if (lex.match(Token::PERCENT)) {
+              op.kind = OperandPat::SSA_DEF;
+              op.name = lex.expectSSAName();
+              lex.expectNext(Token::COMMA);
+              op.type = lex.expectNext(Token::IDENT);
+            } else {
+              op.kind = OperandPat::RECIDENT_DEF;
+              op.recIdent = lex.expectRecordIdent();
+            }
             lex.expectNext(Token::PARENC);
           } else if (lex.matchIdentNext("eq")) {
             op.kind = OperandPat::COND_EQ;
@@ -814,15 +842,25 @@ public:
             op.kind = OperandPat::COND_GE;
           } else if (lex.matchIdentNext("geu")) {
             op.kind = OperandPat::COND_GEU;
+          } else if (lex.matchIdentNext("imm32")) {
+            op.kind = OperandPat::IMM32;
+            lex.expectNext(Token::PARENO);
+            if (lex.match(Token::IDENT)) {
+              op.num = lex.expectNext(Token::IDENT);
+            } else {
+              op.code = lex.expectCode();
+            }
+            lex.expectNext(Token::PARENC);
           } else {
-            std::cerr << std::string_view(lex.peek()) << std::endl;
-            error("Invalid ident in operand pattern");
+            op.kind = OperandPat::RECIDENT_USE;
+            op.recIdent = lex.expectRecordIdent();
           }
         } else if (lex.match(Token::HASH)) {
-          op.kind = OperandPat::PLACEHOLDER;
+          op.kind = OperandPat::OP_PLACEHOLDER;
           op.name = lex.expectPlaceholderName();
         } else {
-          error("Invalid operand pattern");
+          op.kind = OperandPat::RECIDENT_USE;
+          op.recIdent = lex.expectRecordIdent();
         }
       }
       return instr;
@@ -847,29 +885,14 @@ public:
   };
 
   struct IfPat {
-    void parse(Lexer &lex) {
-      while (true) {
-        switch (lex.peekKind()) {
-        case Token::CURLYC:
-          return;
-        default:
-          error("[ir_pat] Invalid token in if");
-          break;
-        case Token::CODE:
-          code.push_back(lex.next());
-          break;
-        case Token::HASH:
-        case Token::PERCENT:
-          lex.fetchToken();
-          code.push_back(lex.expectNext(Token::IDENT));
-          break;
-        }
-      }
-    }
+    void parse(Lexer &lex) { code = lex.expectCode(); }
     std::vector<Token> code;
   };
 
   std::string genType(std::string_view tyStr) {
+    if (tyStr == "ptr") {
+      return "PtrSSAType::get()";
+    }
     static std::regex intRE("i([0-9]+)");
     std::cmatch m;
     if (std::regex_match(tyStr.begin(), tyStr.end(), m, intRE)) {
@@ -885,8 +908,10 @@ public:
       return;
     }
 
-    code.println(std::format("if({}.getKind() != {}) return false;", instrVar,
-                             instrPat.genInstrKind(sym)));
+    if (instrPat.opcode.idents.back() != "_") {
+      code.println(std::format("if({}.getKind() != {}) return false;", instrVar,
+                               instrPat.genInstrKind(sym)));
+    }
     instrPat.isGenerated = true;
     unsigned opNum = 0;
     for (auto &op : instrPat.operands) {
@@ -931,7 +956,7 @@ public:
         }
         break;
       }
-      case OperandPat::PLACEHOLDER:
+      case OperandPat::OP_PLACEHOLDER:
         if (op.name == "_")
           break;
         code.println(std::format("auto &m_ph_{} = {}.getOperand({});", op.name,
@@ -950,6 +975,15 @@ public:
         code.println(std::format(
             "if({}.getOperand({}).brCond() != BrCond::{}()) return false;",
             instrVar, opNum, OperandPat::kindName(op.kind)));
+        break;
+      case OperandPat::IMM32:
+        code.println(
+            std::format("if({}.getOperand({}).imm32() != {}) return false;",
+                        instrVar, opNum, op.num));
+        break;
+      case OperandPat::RECIDENT_DEF:
+      case OperandPat::RECIDENT_USE:
+        error("Unsupported operand pattern in match");
         break;
       }
       op.isGenerated = true;
@@ -971,22 +1005,14 @@ public:
   void genIf(IfPat &pat, CodeBuilder &code) {
     code.indent();
     code.print("if(!(");
-    for (auto &tok : pat.code) {
-      if (tok.kind == Token::CODE) {
-        code.print(tok);
-      } else if (tok.kind == Token::HASH) {
-      } else if (tok.kind == Token::PERCENT) {
-      } else {
-        code.print(std::format("m_ph_{}", tok.str));
-      }
-    }
+    code.print(genCode(pat.code));
     code.print(")) return false;\n");
   }
 
   void genEmit(InstrPats &pats, CodeBuilder &code, SymbolTable &sym) {
     unsigned instrNum = 0;
+    code.println("auto& e_insertpoint = m_root.getNextNode();");
     for (auto &instr : pats.instrs) {
-      code.println("auto& e_insertpoint = m_root.getNextNode();");
       code.println(std::format("Instr *e_instr_{} = new Instr({});", instrNum,
                                instr.genInstrKind(sym)));
       code.println(
@@ -994,7 +1020,8 @@ public:
       code.println(std::format("e_instr_{}->allocateOperands({});", instrNum,
                                instr.operands.size()));
       for (auto &op : instr.operands) {
-        if (op.kind == OperandPat::SSA_DEF) {
+        switch (op.kind) {
+        case OperandPat::SSA_DEF: {
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::SSA_DEF_TYPE>({});",
               instrNum, genType(op.type)));
@@ -1010,22 +1037,82 @@ public:
               matchSSADefs.erase(it);
             }
           }
-        } else if (op.kind == OperandPat::SSA_USE) {
+          break;
+        }
+        case OperandPat::SSA_USE: {
+
           auto it = matchSSADefs.find(op.name);
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::SSA_USE>({}_def_{});",
               instrNum, it == matchSSADefs.end() ? "e" : "m", op.name));
-        } else if (op.kind == OperandPat::PLACEHOLDER) {
+          break;
+        }
+        case OperandPat::OP_PLACEHOLDER: {
+
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::EMPTY>();", instrNum));
           code.println(std::format("e_instr_{}->getLastOperand() = m_ph_{};",
                                    instrNum, op.name));
-        } else {
+          break;
+        }
+        case OperandPat::IMM32: {
+          code.println(std::format(
+              "e_instr_{}->emplaceOperand<Operand::IMM32>({});", instrNum,
+              op.code.size() > 0 ? genCode(op.code) : op.num));
+          break;
+        }
+        case OperandPat::COND_EQ:
+        case OperandPat::COND_NE:
+        case OperandPat::COND_LT:
+        case OperandPat::COND_LTU:
+        case OperandPat::COND_LE:
+        case OperandPat::COND_LEU:
+        case OperandPat::COND_GT:
+        case OperandPat::COND_GTU:
+        case OperandPat::COND_GE:
+        case OperandPat::COND_GEU:
+        case OperandPat::RECIDENT_DEF:
           error("Unsupported operand pattern in emit");
+          break;
+        case OperandPat::RECIDENT_USE: {
+          Record *rec = sym.lookupPath(op.recIdent);
+          if (!rec || rec->parent->type != "Arch" || rec->type != "Register")
+            error("Invalid recIdent");
+          code.println(std::format(
+              "e_instr_{}->emplaceOperand<Operand::REG_USE>({}::{});", instrNum,
+              rec->parent->name, rec->name));
+          break;
+        }
         }
       }
       ++instrNum;
     }
+  }
+
+  std::string genCode(std::vector<Token> code) {
+    std::string res;
+    for (size_t i = 0; i < code.size(); ++i) {
+      auto &tok = code[i];
+      if (tok.kind == Token::CODE) {
+        res += std::string_view(tok);
+      } else if (tok.kind == Token::IDENT) {
+        if (i == 0) {
+          res += std::string_view(tok);
+        } else
+          switch (code[i - 1].kind) {
+          default:
+            res += std::string_view(tok);
+            break;
+          case Token::HASH:
+            res += std::format("m_ph_{}", tok.str);
+            break;
+          case Token::PERCENT:
+            res += std::format("m_def_{}", tok.str);
+            break;
+          }
+      }
+    }
+    return res;
   }
 
   void collectMatchSSADefs(InstrPats &m) {
@@ -1092,6 +1179,20 @@ public:
   std::vector<IfPat> ifPats;
 };
 
+void genKindSwitch(std::string_view fnName, std::vector<RecordSpace *> &rs,
+                   CodeBuilder &code) {
+  code.startFunction(
+      std::format("constexpr const char* {}(unsigned kind)", fnName));
+  code.startBlock("switch(kind)");
+  for (auto rec : rs) {
+    code.println(std::format("case {}:", rec->name));
+    code.println(std::format("return \"{}\";", rec->name));
+  }
+  code.endBlock();
+  code.println("return nullptr;");
+  code.endBlock();
+}
+
 void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   std::vector<RecordSpace *> regRecs;
   std::vector<RecordSpace *> regClassRecs;
@@ -1105,31 +1206,25 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
     code.println(std::format("{},", rec->name));
   }
   code.endBlockSemicolon();
+  genKindSwitch("registerKindName", regRecs, code);
+
   code.startBlock("enum InstrKind");
   code.println("TARGET_INSTR_START = Instr::TARGET_INSTR,");
   for (auto rec : instrRecs) {
     code.println(std::format("{},", rec->name));
   }
   code.endBlockSemicolon();
-
-  code.startFunction("constexpr const char* instrKindName(unsigned kind)");
-  code.startBlock("switch(kind)");
-  for (auto rec : instrRecs) {
-    code.println(std::format("case {}:", rec->name));
-    code.println(std::format("return \"{}\";", rec->name));
-  }
-  code.endBlock();
-  code.println("return nullptr;");
-  code.endBlock();
+  genKindSwitch("instrKindName", instrRecs, code);
 
   code.startBlock("enum RegClassKind");
   for (auto rec : regClassRecs) {
     code.println(std::format("{},", rec->name));
   }
   code.endBlockSemicolon();
+  genKindSwitch("regClassKindName", regClassRecs, code);
 }
 
-void genInstrSelector(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
+void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   std::vector<IRPatternRecord *> recs;
   rs.gatherRecursively(recs, "ir_pat");
   std::stable_sort(
@@ -1158,7 +1253,7 @@ void genInstrSelector(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   }
   numSameOpc = 0;
   lastOpc = std::string_view();
-  code.startFunction("bool dslSelectInstr(Instr &m_root)");
+  code.startFunction("bool dslExecutePat(Instr &m_root)");
   code.startBlock("switch(m_root.getKind())");
   code.println("default:");
   for (auto *rec : recs) {
@@ -1209,7 +1304,7 @@ int main(int argc, char *argv[]) {
                      [&]() { return std::make_unique<IRPatternRecord>(); });
   fac.registerRecord("Arch",
                      [&]() { return std::make_unique<RecordSpace>(fac); });
-  fac.registerRecord("InstrSelector",
+  fac.registerRecord("IRPatExecutor",
                      [&]() { return std::make_unique<RecordSpace>(fac); });
   fac.registerRecord("dsl_list",
                      [&]() { return std::make_unique<DSLListRecord>(); });
@@ -1229,6 +1324,8 @@ int main(int argc, char *argv[]) {
     rec->realType = "token";
     return rec;
   });
+  fac.registerRecord("CommuteToken",
+                     [&] { return std::make_unique<RecordSpace>(fac); });
 
   std::string str = loadFile(argv[1]);
   StringTokenSource tokSrc(str);
@@ -1257,8 +1354,8 @@ int main(int argc, char *argv[]) {
 
   if (genRec->type == "Arch") {
     genArch(dynamic_cast<RecordSpace &>(*genRec), code, sym);
-  } else if (genRec->type == "InstrSelector") {
-    genInstrSelector(dynamic_cast<RecordSpace &>(*genRec), code, sym);
+  } else if (genRec->type == "IRPatExecutor") {
+    genIRPatExecutor(dynamic_cast<RecordSpace &>(*genRec), code, sym);
   } else {
     error("Can't generate this record type");
   }

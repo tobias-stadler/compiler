@@ -49,7 +49,6 @@ let BGEU = Instr {}
 
 let SLTI = Instr {}
 let SLTIU = Instr {}
-
 let SLT = Instr {}
 let SLTU = Instr {}
 

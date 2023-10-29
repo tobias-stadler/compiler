@@ -81,6 +81,7 @@ public:
     std::cout << ")";
     dispatch(ast.st.get());
   }
+
   void visitForSt(ForStAST &ast) {
     std::cout << "for(";
     dispatch(ast.initClause.get());
@@ -90,6 +91,14 @@ public:
     dispatch(ast.exprIter.get());
     std::cout << ")";
     dispatch(ast.st.get());
+  }
+
+  void visitReturnSt(ReturnStAST &ast) {
+    std::cout << "return";
+    if (ast.expr) {
+      std::cout << " ";
+      dispatch(*ast.expr);
+    }
   }
 
   void visitDeclarator(DeclaratorAST &ast) {

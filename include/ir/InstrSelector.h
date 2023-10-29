@@ -38,19 +38,21 @@ public:
       for (auto it = --block.end(), itBegin = --block.begin(); it != itBegin;) {
         auto &instr = *it;
         --it;
-        if (exec->execute(instr)) {
-          instr.deleteThis();
-        } else {
-          std::cerr << "[ISel] Miss for: " << instr.getKind() << "\n";
+
+        if (instr.isPhi() || instr.isTarget()) {
+          continue;
+        }
+        if (!exec->execute(instr)) {
+          std::cerr << "[ISel] Miss for: " << Instr::kindName(instr.getKind());
+          if (isDead(instr)) {
+            std::cerr << ", but dead";
+            instr.deleteThis();
+          }
+          std::cerr << "\n";
         }
       }
     }
   }
 
   IRPatExecutor *exec;
-};
-
-class WorklistPatternExecutionPass : public IRPass<Function> {
-  const char *name() override { return "WorklistPatternExecutionPass"; }
-  void run(Function &obj, IRInfo<Function> &info) override {}
 };

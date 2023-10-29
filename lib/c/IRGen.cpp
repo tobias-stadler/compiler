@@ -439,7 +439,7 @@ public:
         return;
       }
     }
-    ir->emitStore(*tmpOperand, operand);
+    ir->emitStore(operand, *tmpOperand);
   }
 
   ExpressionSemantics::Result semanticConvLValue() {

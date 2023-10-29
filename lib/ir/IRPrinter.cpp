@@ -99,9 +99,15 @@ void PrintIRVisitor::visitOperand(Operand &op) {
     break;
   case Operand::SSA_DEF_BLOCK:
   case Operand::SSA_DEF_FUNCTION:
-  case Operand::REG_USE:
-  case Operand::REG_DEF:
     std::cout << "unnamed";
+    break;
+  case Operand::REG_USE:
+    assert(arch->getRegisterKindName(op.reg()));
+    std::cout << arch->getRegisterKindName(op.reg());
+    break;
+  case Operand::REG_DEF:
+    assert(arch->getRegisterKindName(op.reg()));
+    std::cout << "def(" << arch->getRegisterKindName(op.reg()) << ")";
     break;
   case Operand::TYPE:
     printSSAType(op.type());

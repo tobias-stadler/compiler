@@ -58,6 +58,7 @@ std::unordered_map<std::string_view, Token::Kind> Lexer::keywords = {
     {"case", Token::KEYWORD_CASE},
     {"break", Token::KEYWORD_BREAK},
     {"auto", Token::KEYWORD_AUTO},
+    {"_Bool", Token::KEYWORD__BOOL},
 };
 
 void Lexer::eatToken() {

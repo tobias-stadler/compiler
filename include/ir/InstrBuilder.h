@@ -218,13 +218,13 @@ public:
     return *i;
   }
 
-  Instr &emitStore(Operand &addr, Operand &val) {
-    assert(addr.ssaDefType() == PtrSSAType::get());
+  Instr &emitStore(Operand &val, Operand &addr) {
     assert(val.getKind() == Operand::SSA_DEF_TYPE);
+    assert(addr.ssaDefType() == PtrSSAType::get());
     Instr *i = new Instr(Instr::STORE);
     i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_USE>(addr);
     i->emplaceOperand<Operand::SSA_USE>(val);
+    i->emplaceOperand<Operand::SSA_USE>(addr);
     emit(i);
     return *i;
   }

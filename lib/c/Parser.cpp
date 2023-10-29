@@ -161,6 +161,7 @@ constexpr bool precedenceRightAssoc(int prec) {
 auto getTypeSpecSets() {
   std::vector<std::pair<std::vector<Token::Kind>, Type::Kind>> typeSpecSets{
       {{Token::KEYWORD_VOID}, Type::VOID},
+      {{Token::KEYWORD__BOOL}, Type::BOOL},
 
       {{Token::KEYWORD_CHAR}, Type::SCHAR},
       {{Token::KEYWORD_CHAR, Token::KEYWORD_SIGNED}, Type::SCHAR},
@@ -822,6 +823,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
     case Token::KEYWORD_LONG:
     case Token::KEYWORD_UNSIGNED:
     case Token::KEYWORD_SIGNED:
+    case Token::KEYWORD__BOOL:
       if (enableTypeSpec) {
         typeSpecs.push_back(kind);
         lex->dropToken();

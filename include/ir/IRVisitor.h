@@ -69,8 +69,9 @@ protected:
   }
 
   void visitBlock(Block &block) {
-    for (auto &i : block) {
-      dispatch(i);
+    for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
+      auto itTmp = it++;
+      dispatch(*itTmp);
     }
   }
 
