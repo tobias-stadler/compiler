@@ -56,3 +56,47 @@ public:
 
   IRPatExecutor *exec;
 };
+
+class ExpansionPass : public IRPass<Function> {
+public:
+  ExpansionPass(IRPatExecutor &exec) : exec(&exec) {}
+
+  const char *name() override { return "Expansion"; };
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    for (auto &block : func | std::views::reverse) {
+      for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
+        auto &instr = *it;
+        ++it;
+
+        exec->execute(instr);
+      }
+    }
+  }
+
+  IRPatExecutor *exec;
+};
+
+class CombinerPass : public IRPass<Function> {
+public:
+  CombinerPass(IRPatExecutor &exec) : exec(&exec) {}
+
+  const char *name() override { return "Combiner"; };
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    bool Changed = false;
+    do {
+      for (auto &block : func | std::views::reverse) {
+        for (auto it = --block.end(), itBegin = --block.begin();
+             it != itBegin;) {
+          auto &instr = *it;
+          --it;
+
+          Changed |= exec->execute(instr);
+        }
+      }
+    } while (Changed);
+  }
+
+  IRPatExecutor *exec;
+};

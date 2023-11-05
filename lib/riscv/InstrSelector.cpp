@@ -11,12 +11,12 @@ unsigned selectExtShiftBits(Operand &op) {
   return XLEN - static_cast<IntSSAType &>(op.ssaDefType()).getBits();
 }
 
-#include "riscv/InstrSelector.dsl.h"
+#include "riscv/InstrSelector.dsl.isel.h"
 } // namespace
 
 namespace riscv {
 
-bool InstrSelector::execute(Instr &instr) {
+bool InstrSelect::execute(Instr &instr) {
   if (!dslExecutePat(instr)) {
     return false;
   }

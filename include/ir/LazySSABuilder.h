@@ -103,6 +103,8 @@ public:
     def = &phi->getDef();
     renum.set(id, def);
     populatePhi(phi, id);
+    def = &foldPhi(phi);
+    renum.set(id, def);
     renum.marked = false;
     return def;
   }
@@ -118,10 +120,41 @@ public:
     renum.sealed = true;
     for (auto [instr, id] : renum.incompletePhis) {
       populatePhi(PhiInstrPtr(instr), id);
+      Operand &foldedDef = foldPhi(PhiInstrPtr(instr));
+      renum.set(id, foldedDef);
     }
   }
 
 private:
+  static Operand &foldPhi(PhiInstrPtr phi) {
+    Operand *nonSelfDef = nullptr;
+    for (unsigned i = 0, iEnd = phi.getNumPredecessors(); i < iEnd; ++i) {
+      Operand &op = phi.getPredecessorDef(i);
+      if (&op == &phi->getDef() || &op == nonSelfDef) {
+        continue;
+      }
+      if (nonSelfDef) {
+        return phi->getDef();
+      }
+      nonSelfDef = &op;
+    }
+    assert(nonSelfDef && "Phi must use at least one real value");
+    std::vector<Instr *> worklist;
+    for (auto &use : phi->getDef().ssaDef()) {
+      if (!use.getParent().isPhi() || &use.getParent() == phi.get()) {
+        continue;
+      }
+      worklist.push_back(&use.getParent());
+    }
+    phi->getDef().ssaDef().replaceAllUses(*nonSelfDef);
+    phi->deleteThis();
+    for (auto *instr : worklist) {
+      assert(false && "Update renum");
+      foldPhi(PhiInstrPtr(instr));
+    }
+    return *nonSelfDef;
+  }
+
   static void populatePhi(PhiInstrPtr phi, SSASymbolId id) {
     phi.setupPredecessors(phi->getParent().getNumPredecessors());
     unsigned predNum = 0;

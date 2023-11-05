@@ -619,6 +619,7 @@ public:
     CALL,
     EXT_Z,
     EXT_S,
+    EXT_A,
     TRUNC,
     COPY,
     CONV,
@@ -634,6 +635,18 @@ public:
   }
   static constexpr bool kindIsTarget(unsigned kind) {
     return kind > TARGET_INSTR;
+  }
+
+  static constexpr bool kindIsArtifact(unsigned kind) {
+    switch (kind) {
+    default:
+      return false;
+    case TRUNC:
+    case EXT_S:
+    case EXT_Z:
+    case EXT_A:
+      return true;
+    }
   }
 
   static constexpr bool kindHasSideEffects(unsigned kind) {
@@ -695,6 +708,8 @@ public:
       return "EXT_Z";
     case EXT_S:
       return "EXT_S";
+    case EXT_A:
+      return "EXT_A";
     case CONV:
       return "CONV";
     case TRUNC:
@@ -796,7 +811,7 @@ public:
   }
 
   bool isPhi() { return kind == PHI; }
-
+  bool isArtifact() { return kindIsTarget(kind); }
   bool isTarget() { return kindIsTarget(kind); }
 
 private:

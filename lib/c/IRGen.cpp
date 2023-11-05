@@ -303,7 +303,8 @@ public:
       dispatch(ast.getLHS());
       sema.promoteInt();
       if (rhs.tmpOperand->ssaDefType() != tmpOperand->ssaDefType()) {
-        ir->emitExtOrTrunc(tmpOperand->ssaDefType(), *rhs.tmpOperand);
+        ir->emitExtOrTrunc(Instr::EXT_Z, tmpOperand->ssaDefType(),
+                           *rhs.tmpOperand);
         rhs.tmpOperand = &ir.getDef();
       }
       if (ast.getKind() == AST::LSHIFT) {
@@ -468,8 +469,9 @@ public:
   }
 
   ExpressionSemantics::Result semanticConvInt(Type::Kind dstKind) {
-    ir->emitExtOrTrunc(Type::irType(dstKind), *tmpOperand,
-                       Type::isSigned(sema.getType()->getKind()));
+    ir->emitExtOrTrunc(Type::isSigned(sema.getType()->getKind()) ? Instr::EXT_S
+                                                                 : Instr::EXT_Z,
+                       Type::irType(dstKind), *tmpOperand);
     tmpOperand = &ir.getDef();
     // TODO: proper conversion between signed and unsigned
     return ExpressionSemantics::SUCCESS;

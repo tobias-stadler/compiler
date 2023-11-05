@@ -1,17 +1,19 @@
 set(DSL_HDRS)
 macro(dslgen arg_file arg_rec)
-  add_custom_command(OUTPUT dsl/${arg_file}.h
+  add_custom_command(OUTPUT dsl/${arg_file}.${arg_rec}.h
     COMMAND dsl-cc
       ${CMAKE_CURRENT_SOURCE_DIR}/${arg_file}
-      ${CMAKE_CURRENT_BINARY_DIR}/dsl/${arg_file}.h
+      ${CMAKE_CURRENT_BINARY_DIR}/dsl/${arg_file}.${arg_rec}.h
       ${arg_rec}
       ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS dsl-cc ${arg_file}
     )
-  list(APPEND DSL_HDRS dsl/${arg_file}.h)
+  list(APPEND DSL_HDRS dsl/${arg_file}.${arg_rec}.h)
 endmacro()
 
 dslgen(riscv/Arch.dsl riscv)
+dslgen(riscv/InstrSelector.dsl preISelExpansion)
+dslgen(riscv/InstrSelector.dsl preISelCombine)
 dslgen(riscv/InstrSelector.dsl isel)
 
 add_library(core

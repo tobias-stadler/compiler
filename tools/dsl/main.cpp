@@ -816,7 +816,11 @@ public:
               op.kind = OperandPat::SSA_DEF;
               op.name = lex.expectSSAName();
               lex.expectNext(Token::COMMA);
-              op.type = lex.expectNext(Token::IDENT);
+              if (lex.match(Token::IDENT)) {
+                op.type = lex.expectNext(Token::IDENT);
+              } else {
+                op.code = lex.expectCode();
+              }
             } else {
               op.kind = OperandPat::RECIDENT_DEF;
               op.recIdent = lex.expectRecordIdent();
@@ -885,6 +889,11 @@ public:
   };
 
   struct IfPat {
+    void parse(Lexer &lex) { code = lex.expectCode(); }
+    std::vector<Token> code;
+  };
+
+  struct ApplyPat {
     void parse(Lexer &lex) { code = lex.expectCode(); }
     std::vector<Token> code;
   };
@@ -1009,6 +1018,12 @@ public:
     code.print(")) return false;\n");
   }
 
+  void genApply(ApplyPat &pat, CodeBuilder &code) {
+    code.indent();
+    code.print(genCode(pat.code));
+    code.print(";");
+  }
+
   void genEmit(InstrPats &pats, CodeBuilder &code, SymbolTable &sym) {
     unsigned instrNum = 0;
     code.println("auto& e_insertpoint = m_root.getNextNode();");
@@ -1024,7 +1039,8 @@ public:
         case OperandPat::SSA_DEF: {
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::SSA_DEF_TYPE>({});",
-              instrNum, genType(op.type)));
+              instrNum,
+              op.code.size() > 0 ? genCode(op.code) : genType(op.type)));
           if (op.name != "_") {
             code.println(
                 std::format("auto &e_def_{} = e_instr_{}->getLastOperand();",
@@ -1040,7 +1056,6 @@ public:
           break;
         }
         case OperandPat::SSA_USE: {
-
           auto it = matchSSADefs.find(op.name);
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::SSA_USE>({}_def_{});",
@@ -1048,7 +1063,6 @@ public:
           break;
         }
         case OperandPat::OP_PLACEHOLDER: {
-
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::EMPTY>();", instrNum));
           code.println(std::format("e_instr_{}->getLastOperand() = m_ph_{};",
@@ -1149,6 +1163,9 @@ public:
       } else if (recType == "if") {
         ifPats.emplace_back();
         ifPats.back().parse(lex);
+      } else if (recType == "apply") {
+        applyPats.emplace_back();
+        applyPats.back().parse(lex);
       } else {
         error("Invalid operator in ir_pat");
       }
@@ -1168,6 +1185,9 @@ public:
       code.println();
       genEmit(emitPats, code, sym);
     }
+    for (auto &pat : applyPats) {
+      genApply(pat, code);
+    }
     code.println("return true;");
   }
 
@@ -1177,6 +1197,7 @@ public:
   InstrPats matchPats;
   InstrPats emitPats;
   std::vector<IfPat> ifPats;
+  std::vector<ApplyPat> applyPats;
 };
 
 void genKindSwitch(std::string_view fnName, std::vector<RecordSpace *> &rs,

@@ -123,6 +123,62 @@ ir_pat {
 }
 }
 
+let ArtifactCombinePat = Template {
+ir_pat {
+  match {
+    ART1 def(%a1,_) %src;
+    ART2 def(%a2,_) %a1;
+  }
+  emit {
+    OUT def(%a2,%a2$.ssaDefType()$) %src;
+  }
+}
+}
+
+let preISelExpansion = IRPatExecutor {
+
+}
+
+let preISelCombine = IRPatExecutor {
+!ArtifactCombinePat {
+  let ART1 = token {EXT_Z}
+  let ART2 = token {EXT_Z}
+  let OUT = token {EXT_Z}
+}
+!ArtifactCombinePat {
+  let ART1 = token {EXT_S}
+  let ART2 = token {EXT_S}
+  let OUT = token {EXT_S}
+}
+!ArtifactCombinePat {
+  let ART1 = token {EXT_A}
+  let ART2 = token {EXT_A}
+  let OUT = token {EXT_A}
+}
+!ArtifactCombinePat {
+  let ART1 = token {TRUNC}
+  let ART2 = token {TRUNC}
+  let OUT = token {TRUNC}
+}
+!ArtifactCombinePat {
+  let ART1 = token {EXT_Z}
+  let ART2 = token {EXT_S}
+  let OUT = token {EXT_Z}
+}
+ir_pat {
+  match {
+    TRUNC def(%a1,_) %src;
+    EXT_A def(%a2,_) %a1;
+  }
+  if {
+    %src $.ssaDefType() == $ %a2 $.ssaDefType()$
+  }
+  apply {
+    %a2 $.ssaDef().replaceAllUses($ %src $)$
+  }
+}
+}
+
 let isel = IRPatExecutor {
 !TruncExtPat {
   let IN = token {EXT_Z}

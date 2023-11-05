@@ -34,8 +34,11 @@ public:
   Block &getPredecessorBlock(unsigned n) {
     return instr->getChainOperand().chain().getOperand(n * 2 + 1).block();
   }
+  Operand &getPredecessorUse(unsigned n) {
+    return instr->getChainOperand().chain().getOperand(n * 2);
+  }
   Operand &getPredecessorDef(unsigned n) {
-    return instr->getChainOperand().chain().getOperand(n * 2).ssaUse().getDef();
+    return getPredecessorUse(n).ssaUse().getDef();
   }
 
   bool isComplete() { return instr->getChainOperand().chain().isAllocated(); }
@@ -126,12 +129,13 @@ public:
     return i;
   }
 
-  Instr &emitExt(SSAType &type, Operand &val, bool isSigned = false) {
+  Instr &emitExt(Instr::Kind kind, SSAType &type, Operand &val) {
+    assert(Instr::kindIsArtifact(kind));
     assert(val.ssaDefType().getKind() == SSAType::INT &&
            type.getKind() == SSAType::INT);
     assert(static_cast<IntSSAType &>(type).getBits() >
            static_cast<IntSSAType &>(val.ssaDefType()).getBits());
-    Instr *i = new Instr(isSigned ? Instr::EXT_S : Instr::EXT_Z);
+    Instr *i = new Instr(kind);
     i->allocateOperands(2);
     i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i->emplaceOperand<Operand::SSA_USE>(val);
@@ -161,7 +165,7 @@ public:
     return *i;
   }
 
-  Instr &emitExtOrTrunc(SSAType &type, Operand &val, bool isSigned = false) {
+  Instr &emitExtOrTrunc(Instr::Kind kind, SSAType &type, Operand &val) {
     assert(val.ssaDefType().getKind() == SSAType::INT &&
            type.getKind() == SSAType::INT);
     unsigned dstBits = static_cast<IntSSAType &>(type).getBits();
@@ -169,7 +173,7 @@ public:
     if (dstBits < srcBits) {
       return emitTrunc(type, val);
     } else if (dstBits > srcBits) {
-      return emitExt(type, val, isSigned);
+      return emitExt(kind, type, val);
     } else {
       return emitCopy(val);
     }

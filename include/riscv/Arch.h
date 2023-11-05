@@ -7,10 +7,11 @@
 #include "ir/InstrBuilder.h"
 #include "ir/InstrSelector.h"
 #include <cassert>
+#include <initializer_list>
 
 namespace riscv {
 
-#include "riscv/Arch.dsl.h"
+#include "riscv/Arch.dsl.riscv.h"
 
 class Arch : public ::Arch {
 public:
@@ -22,63 +23,114 @@ public:
   }
 };
 
-class InstrSelector : public IRPatExecutor {
+class InstrSelect : public IRPatExecutor {
   bool execute(Instr &instr) override;
 };
 
-class PreISelConstraintsPass : public IRPass<Function>,
-                               public IRVisitor<PreISelConstraintsPass> {
+class PreISelExpansion : public IRPatExecutor {
+#include "riscv/InstrSelector.dsl.preISelExpansion.h"
+  bool execute(Instr &instr) override {
+    switch (instr.getKind()) {
+    case Instr::PHI:
+      legalizePhi(PhiInstrPtr(&instr));
+      break;
+    case Instr::CONST_INT:
+    case Instr::SL_L:
+    case Instr::SR_L:
+    case Instr::SR_A:
+      legalizeAllOperands(Instr::EXT_Z, instr);
+      break;
+    case Instr::AND:
+    case Instr::OR:
+    case Instr::XOR:
+    case Instr::ADD:
+    case Instr::SUB:
+      legalizeAllOperands(Instr::EXT_A, instr);
+      break;
+    case Instr::CMP:
+      legalizeOperands(Instr::EXT_Z, instr,
+                       {&instr.getOperand(2), &instr.getOperand(3)});
+      break;
+    }
+    dslExecutePat(instr);
+    return true;
+  }
 
-  void run(Function &func, IRInfo<Function> &info) override {
-    for (auto &block : func) {
-      for (auto &instr : block) {
-        switch (instr.getKind()) {
-        case Instr::CONST_INT:
-        case Instr::ADD:
-        case Instr::SUB:
-        case Instr::SL_L:
-        case Instr::SR_L:
-        case Instr::SR_A:
-        case Instr::AND:
-        case Instr::OR:
-        case Instr::XOR:
-          legalizeOperandsToI32(instr);
-          break;
-        }
-      }
+  void legalizePhi(PhiInstrPtr phi) {
+    InstrBuilder postIr(phi->getNextNode());
+    legalizeSSADef(phi->getDef(), IntSSAType::get(32), postIr);
+    for (int i = 0, iEnd = phi.getNumPredecessors(); i < iEnd; ++i) {
+      InstrBuilder preIr(phi.getPredecessorBlock(i).getLast());
+      legalizeSSAUse(Instr::EXT_A, phi.getPredecessorUse(i),
+                     IntSSAType::get(32), preIr);
     }
   }
 
-  void legalizeOperandsToI32(Instr &instr) {
+  void legalizeOperands(Instr::Kind ext, Instr &instr,
+                        std::initializer_list<Operand *> ops) {
+    InstrBuilder preIr(instr);
+    InstrBuilder postIr(instr.getNextNode());
+    for (auto *op : ops) {
+      legalizeOperand(ext, *op, preIr, postIr);
+    }
+  }
+
+  void legalizeAllOperands(Instr::Kind ext, Instr &instr) {
     InstrBuilder preIr(instr);
     InstrBuilder postIr(instr.getNextNode());
     for (auto &op : instr) {
-      if (op.isSSADef()) {
-        SSAType &ty = op.ssaDefType();
-        if (ty.getKind() == SSAType::INT) {
-          IntSSAType &intTy = static_cast<IntSSAType &>(ty);
-          if (intTy.getBits() < 32) {
-            op.ssaDefSetType(IntSSAType::get(32));
-            postIr.emitTrunc(intTy, op);
-            op.ssaDef().replaceAllUses(postIr.getDef());
-            postIr.getLastInstr()->getOperand(1).ssaUseReplace(op);
-          }
-        }
-      } else if (op.isSSAUse()) {
-        if (op.ssaUse().getDef().isSSARegDef() &&
-            op.ssaUse().getDef().ssaDefType().getKind() == SSAType::INT) {
-          IntSSAType &intTy =
-              static_cast<IntSSAType &>(op.ssaUse().getDef().ssaDefType());
-          if (intTy.getBits() < 32) {
-            preIr.emitExt(IntSSAType::get(32), op.ssaUse().getDef());
-            op.ssaUseReplace(preIr.getDef());
-          }
-        }
-      }
+      legalizeOperand(ext, op, preIr, postIr);
     }
   }
 
-  const char *name() override { return "RiscVPreISelConstraints"; }
+  void legalizeOperand(Instr::Kind ext, Operand &op, InstrBuilder &preIr,
+                       InstrBuilder &postIr) {
+    if (op.isSSADef()) {
+      legalizeSSADef(op, IntSSAType::get(32), postIr);
+    } else if (op.isSSAUse()) {
+      legalizeSSAUse(ext, op, IntSSAType::get(32), preIr);
+    }
+  }
+
+  void legalizeSSAUse(Instr::Kind ext, Operand &op, IntSSAType &expectedTy,
+                      InstrBuilder &ir) {
+    assert(op.isSSAUse());
+    Operand &def = op.ssaUse().getDef();
+    if (!def.isSSARegDef() || def.ssaDefType().getKind() != SSAType::INT) {
+      return;
+    }
+    IntSSAType &intTy = static_cast<IntSSAType &>(def.ssaDefType());
+    if (intTy.getBits() < expectedTy.getBits()) {
+      ir.emitExt(ext, expectedTy, op.ssaUse().getDef());
+      op.ssaUseReplace(ir.getDef());
+    }
+  }
+
+  void legalizeSSADef(Operand &op, IntSSAType &expectedTy, InstrBuilder &ir) {
+    assert(op.isSSADef());
+    SSAType &ty = op.ssaDefType();
+    if (ty.getKind() != SSAType::INT) {
+      return;
+    }
+    IntSSAType &intTy = static_cast<IntSSAType &>(ty);
+    if (intTy.getBits() < expectedTy.getBits()) {
+      op.ssaDefSetType(expectedTy);
+      ir.emitTrunc(intTy, op);
+      op.ssaDef().replaceAllUses(ir.getDef());
+      ir.getLastInstr()->getOperand(1).ssaUseReplace(op);
+    }
+  }
+};
+
+class PreISelCombine : public IRPatExecutor {
+#include "riscv/InstrSelector.dsl.preISelCombine.h"
+  bool execute(Instr &instr) override {
+    if (!dslExecutePat(instr)) {
+      return false;
+    }
+    instr.deleteThis();
+    return false;
+  }
 };
 
 class BranchLoweringPass : public IRPass<Function>,

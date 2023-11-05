@@ -112,7 +112,7 @@ private:
 };
 
 class PrintRegLivenessPass : public IRPass<Function> {
-  const char *name() { return "PrintDominatorTreePass"; }
+  const char *name() { return "PrintRegLivenessPass"; }
 
   void run(Function &func, IRInfo<Function> &info) {
     auto regLive = info.query<RegLiveness>();
