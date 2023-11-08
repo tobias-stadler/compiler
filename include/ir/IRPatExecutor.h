@@ -27,9 +27,9 @@ inline bool isDead(Instr &instr) {
   return !Instr::kindHasSideEffects(instr.getKind()) && hasNoUsers(instr);
 }
 
-class InstrSelectorPass : public IRPass<Function> {
+class InstrSelectPass : public IRPass<Function> {
 public:
-  InstrSelectorPass(IRPatExecutor &exec) : exec(&exec) {}
+  InstrSelectPass(IRPatExecutor &exec) : exec(&exec) {}
 
   const char *name() override { return "InstrSelector"; };
 
@@ -57,11 +57,11 @@ public:
   IRPatExecutor *exec;
 };
 
-class ExpansionPass : public IRPass<Function> {
+class InstrExpansionPass : public IRPass<Function> {
 public:
-  ExpansionPass(IRPatExecutor &exec) : exec(&exec) {}
+  InstrExpansionPass(IRPatExecutor &exec) : exec(&exec) {}
 
-  const char *name() override { return "Expansion"; };
+  const char *name() override { return "InstrExpansion"; };
 
   void run(Function &func, IRInfo<Function> &info) override {
     for (auto &block : func | std::views::reverse) {
@@ -77,11 +77,11 @@ public:
   IRPatExecutor *exec;
 };
 
-class CombinerPass : public IRPass<Function> {
+class InstrCombinePass : public IRPass<Function> {
 public:
-  CombinerPass(IRPatExecutor &exec) : exec(&exec) {}
+  InstrCombinePass(IRPatExecutor &exec) : exec(&exec) {}
 
-  const char *name() override { return "Combiner"; };
+  const char *name() override { return "InstrCombiner"; };
 
   void run(Function &func, IRInfo<Function> &info) override {
     bool Changed = false;

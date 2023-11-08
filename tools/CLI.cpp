@@ -1,4 +1,4 @@
-#include "ir/InstrSelector.h"
+#include "ir/IRPatExecutor.h"
 #include <c/AST.h>
 #include <c/ASTPrinter.h>
 #include <c/IRGen.h>
@@ -19,7 +19,6 @@
 #include <string>
 
 int main(int argc, char *argv[]) {
-  using namespace c;
   if (argc != 2) {
     std::cerr << "Expected filename" << std::endl;
     return EXIT_FAILURE;
@@ -36,9 +35,9 @@ int main(int argc, char *argv[]) {
   str.resize(sz);
   f.read(str.data(), sz);
 
-  Lexer lex(str);
-  SymbolTable sym;
-  Parser p(lex, sym);
+  c::Lexer lex(str);
+  c::SymbolTable sym;
+  c::Parser p(lex, sym);
 
   auto ast = p.parseTranslationUnit();
   if (!ast) {
@@ -67,53 +66,11 @@ int main(int argc, char *argv[]) {
   riscv::PreISelExpansion expansion;
   riscv::PreISelCombine combine;
   riscv::InstrSelect isel;
-  pipeline.addPass(std::make_unique<ExpansionPass>(expansion));
-  pipeline.addPass(std::make_unique<CombinerPass>(combine));
-  pipeline.addPass(std::make_unique<InstrSelectorPass>(isel));
+  pipeline.addPass(std::make_unique<InstrExpansionPass>(expansion));
+  pipeline.addPass(std::make_unique<InstrCombinePass>(combine));
+  pipeline.addPass(std::make_unique<InstrSelectPass>(isel));
   pipeline.addPass(std::make_unique<riscv::BranchLoweringPass>());
   pipeline.addPass(std::make_unique<PrintIRPass>(&arch));
   pipeline.run(func);
-
-  /*
-  Function func;
-  Block *b = new Block();
-  Block *b2 = new Block();
-  func.insertBegin(b);
-  func.insertEnd(b2);
-  InstrBuilder e2(*b2);
-  auto &i4 = e2.emitConstInt(IntSSAType::get(32), 4);
-  InstrBuilder e1(*b);
-  auto &i1 = e1.emitConstInt(IntSSAType::get(32), 1);
-  auto &i2 = e1.emitConstInt(IntSSAType::get(32), 2);
-  auto &i3 = e1.emitAdd(i1.getDef(), i2.getDef());
-  auto &i5 = e1.emitCmp(BrCond::eq(), i3.getDef(), i4.getDef());
-  e1.emitBrCond(i5.getDef(), *b2, *b);
-  PrintIR(func);
-  */
-
   return EXIT_SUCCESS;
 }
-
-/*
-void interactive() {
-  std::cout << "Hello\n";
-  std::string line;
-  while (std::getline(std::cin, line)) {
-    Lexer lex{line};
-    Token tok;
-    while (!(tok = lex.nextToken()).isEnd()) {
-      std::cout << tok << std::endl;
-    }
-    Lexer lexP{line};
-    Parser p{&lexP};
-    auto ast = p.parseTranslationUnit();
-    if (!ast) {
-      std::cout << "Parsing failed\n";
-      continue;
-    }
-    std::cout << "Parsing finished\n";
-    PrintAST(*ast.res());
-  }
-  return;
-}
-*/

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "ir/InstrSelector.h"
-
 class Arch {
 public:
   virtual const char *getInstrKindName(unsigned kind) = 0;

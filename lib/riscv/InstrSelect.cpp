@@ -1,4 +1,3 @@
-#include "ir/InstrSelector.h"
 #include "ir/IR.h"
 #include "riscv/Arch.h"
 #include "support/TCInt.h"
@@ -12,6 +11,7 @@ unsigned selectExtShiftBits(Operand &op) {
 }
 
 #include "riscv/InstrSelector.dsl.isel.h"
+
 } // namespace
 
 namespace riscv {

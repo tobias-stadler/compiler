@@ -27,7 +27,9 @@ ir/IR.cpp
 ir/IRPrinter.cpp
 ir/RegLiveness.cpp
 ir/DominatorTree.cpp
-riscv/InstrSelector.cpp
+riscv/PreISelExpansion.cpp
+riscv/PreISelCombine.cpp
+riscv/InstrSelect.cpp
 ${DSL_HDRS}
 )
 
