@@ -4,6 +4,7 @@
 #include "ir/IR.h"
 #include "ir/IRPass.h"
 #include "ir/IRVisitor.h"
+#include <functional>
 #include <optional>
 #include <unordered_map>
 
@@ -29,14 +30,20 @@ class PrintIRVisitor : public IRVisitor<PrintIRVisitor> {
   friend class IRVisitor;
 
 public:
+  using callback_t = void(Instr &);
   static const IRInfoID ID;
 
   PrintIRVisitor(Arch *arch) : arch(arch) {}
 
   void printNumberedDef(Operand &op);
   void printSSAType(SSAType &type);
+  void printReg(Reg reg);
 
   NumberingIRVisitor &getNumbering() { return numbering; }
+
+  void setPreInstrCallback(std::function<callback_t> cb) {
+    preInstrCallback = cb;
+  }
 
 protected:
   void visitProgram(Program &prog);
@@ -47,12 +54,12 @@ protected:
 
   NumberingIRVisitor numbering;
   Arch *arch;
+
+  std::function<callback_t> preInstrCallback = [](Instr &) {};
 };
 
 class PrintIRPass : public IRPass<Function> {
 public:
-  PrintIRPass(Arch *arch = nullptr) : arch(arch), irVisitor(arch) {}
-
   const char *name() { return "PrintIRPass"; }
 
   void advertise(IRInfo<Function> &info) { info.advertise<PrintIRVisitor>(); }
@@ -60,12 +67,12 @@ public:
   void invalidate(IRInfo<Function> &) {}
 
   void run(Function &obj, IRInfo<Function> &info) {
-    irVisitor = PrintIRVisitor(arch);
+    irVisitor = PrintIRVisitor(info.getArchUnchecked());
     irVisitor.dispatch(obj);
     info.publish(irVisitor);
+    info.preserveAll();
   }
 
 private:
-  PrintIRVisitor irVisitor;
-  Arch *arch;
+  PrintIRVisitor irVisitor{nullptr};
 };

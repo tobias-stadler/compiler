@@ -26,6 +26,9 @@ public:
     return *static_cast<N *>(prev);
   }
 
+  bool hasNext() { return next && next->next; }
+  bool hasPrev() { return prev && prev->prev; }
+
   IntrusiveListNode &getNextNode() {
     assert(next);
     return *next;
@@ -167,6 +170,8 @@ public:
 
   auto rbegin() { return std::make_reverse_iterator(end()); }
   auto rend() { return std::make_reverse_iterator(begin()); }
+
+  bool empty() { return begin() == end(); }
 
 protected:
   IntrusiveList(const IntrusiveList &o) = delete;

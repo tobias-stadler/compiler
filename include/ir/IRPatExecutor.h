@@ -31,7 +31,7 @@ class InstrSelectPass : public IRPass<Function> {
 public:
   InstrSelectPass(IRPatExecutor &exec) : exec(&exec) {}
 
-  const char *name() override { return "InstrSelector"; };
+  const char *name() override { return "InstrSelectPass"; };
 
   void run(Function &func, IRInfo<Function> &info) override {
     for (auto &block : func | std::views::reverse) {
@@ -61,7 +61,7 @@ class InstrExpansionPass : public IRPass<Function> {
 public:
   InstrExpansionPass(IRPatExecutor &exec) : exec(&exec) {}
 
-  const char *name() override { return "InstrExpansion"; };
+  const char *name() override { return "InstrExpansionPass"; };
 
   void run(Function &func, IRInfo<Function> &info) override {
     for (auto &block : func | std::views::reverse) {
@@ -81,7 +81,7 @@ class InstrCombinePass : public IRPass<Function> {
 public:
   InstrCombinePass(IRPatExecutor &exec) : exec(&exec) {}
 
-  const char *name() override { return "InstrCombiner"; };
+  const char *name() override { return "InstrCombinePass"; };
 
   void run(Function &func, IRInfo<Function> &info) override {
     bool Changed = false;

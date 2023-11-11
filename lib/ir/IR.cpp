@@ -60,6 +60,15 @@ void SSADef::replaceAllUses(Operand &newDef) {
   chNext = nullptr;
 }
 
+void SSADef::replaceAllUses(Reg reg) {
+  for (Operand *useOp = chNext; useOp;) {
+    Operand &tmpOp = *useOp;
+    useOp = tmpOp.ssaUse().chNext;
+    tmpOp.emplaceRaw<Operand::REG_USE>(reg);
+  }
+  chNext = nullptr;
+}
+
 bool SSADef::hasExactlyNUses(unsigned n) {
   unsigned count = 0;
   for (Operand *use = chNext; use && count <= n; use = use->ssaUse().chNext) {

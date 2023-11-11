@@ -537,6 +537,24 @@ public:
   }
 };
 
+class BoolRecord : public Record {
+public:
+  void parse(Lexer &lex) override {
+    std::string_view tok = lex.expectNext(Token::IDENT);
+    if (tok == "true") {
+      val = true;
+    } else if (tok == "false") {
+      val = false;
+    } else {
+      error("Invalid bool value");
+    }
+  }
+
+  bool val;
+
+  const char *gen() { return val ? "true" : "false"; }
+};
+
 class TemplateRecord : public RecordSpace {
 public:
   static RecordFactory facImpl;
@@ -1090,7 +1108,7 @@ public:
           break;
         case OperandPat::RECIDENT_USE: {
           Record *rec = sym.lookupPath(op.recIdent);
-          if (!rec || rec->parent->type != "Arch" || rec->type != "Register")
+          if (!rec || rec->parent->type != "Arch" || rec->type != "Reg")
             error("Invalid recIdent");
           code.println(std::format(
               "e_instr_{}->emplaceOperand<Operand::REG_USE>({}::{});", instrNum,
@@ -1218,26 +1236,51 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   std::vector<RecordSpace *> regRecs;
   std::vector<RecordSpace *> regClassRecs;
   std::vector<RecordSpace *> instrRecs;
-  rs.gather(regRecs, "Register");
+  rs.gather(regRecs, "Reg");
   rs.gather(regClassRecs, "RegClass");
   rs.gather(instrRecs, "Instr");
 
-  code.startBlock("enum RegisterKind");
+  code.startBlock("enum ArchRegKind");
+  code.println("ARCH_REG_START,");
   for (auto rec : regRecs) {
     code.println(std::format("{},", rec->name));
   }
+  code.println("ARCH_REG_END,");
   code.endBlockSemicolon();
-  genKindSwitch("registerKindName", regRecs, code);
+  code.startBlock("inline const ArchReg archRegs[] =");
+  for (auto rec : regRecs) {
+    auto *noLiveness = dynamic_cast<BoolRecord *>(rec->getRecord("noLiveness"));
+    code.println(std::format("{{ .name = \"{}\", .noLiveness = {}}},",
+                             rec->name,
+                             noLiveness ? noLiveness->gen() : "false"));
+  }
+  code.endBlockSemicolon();
+  code.startFunction("constexpr const ArchReg* getArchReg(unsigned kind)");
+  code.println("return kind > ARCH_REG_START && kind < ARCH_REG_END ? archRegs "
+               "+ (kind - ARCH_REG_START - 1)"
+               ": nullptr;");
+  code.endBlock();
 
-  code.startBlock("enum InstrKind");
-  code.println("TARGET_INSTR_START = Instr::TARGET_INSTR,");
+  code.startBlock("enum ArchInstrKind");
+  code.println("ARCH_INSTR_START = Instr::ARCH_INSTR,");
   for (auto rec : instrRecs) {
     code.println(std::format("{},", rec->name));
   }
+  code.println("ARCH_INSTR_END");
   code.endBlockSemicolon();
-  genKindSwitch("instrKindName", instrRecs, code);
+  code.startBlock("inline const ArchInstr archInstrs[] =");
+  for (auto rec : instrRecs) {
+    code.println(std::format("{{ .name = \"{}\"}},", rec->name));
+  }
+  code.endBlockSemicolon();
+  code.startFunction("constexpr const ArchInstr* getArchInstr(unsigned kind)");
+  code.println(
+      "return kind > ARCH_INSTR_START && kind < ARCH_INSTR_END ? archInstrs "
+      "+ (kind - ARCH_INSTR_START - 1)"
+      ": nullptr;");
+  code.endBlock();
 
-  code.startBlock("enum RegClassKind");
+  code.startBlock("enum ArchRegClassKind");
   for (auto rec : regClassRecs) {
     code.println(std::format("{},", rec->name));
   }
@@ -1329,7 +1372,7 @@ int main(int argc, char *argv[]) {
                      [&]() { return std::make_unique<RecordSpace>(fac); });
   fac.registerRecord("dsl_list",
                      [&]() { return std::make_unique<DSLListRecord>(); });
-  fac.registerRecord("Register",
+  fac.registerRecord("Reg",
                      [&]() { return std::make_unique<RecordSpace>(fac); });
   fac.registerRecord("Instr",
                      [&]() { return std::make_unique<RecordSpace>(fac); });
@@ -1347,6 +1390,7 @@ int main(int argc, char *argv[]) {
   });
   fac.registerRecord("CommuteToken",
                      [&] { return std::make_unique<RecordSpace>(fac); });
+  fac.registerRecord("bool", [] { return std::make_unique<BoolRecord>(); });
 
   std::string str = loadFile(argv[1]);
   StringTokenSource tokSrc(str);

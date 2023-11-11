@@ -43,6 +43,17 @@ void PrintIRVisitor::printSSAType(SSAType &type) {
   }
 }
 
+void PrintIRVisitor::printReg(Reg reg) {
+  if (arch) {
+    const ArchReg *archReg = arch->getArchReg(reg);
+    if (archReg) {
+      std::cout << archReg->name;
+      return;
+    }
+  }
+  std::cout << "@" << reg.getNum();
+}
+
 void PrintIRVisitor::visitProgram(Program &prog) {
   for (auto &f : prog.functions) {
     std::cout << "---\n";
@@ -67,10 +78,12 @@ void PrintIRVisitor::visitBlock(Block &block) {
 }
 
 void PrintIRVisitor::visitInstr(Instr &instr) {
-  const char *instrName =
-      arch ? arch->getInstrKindName(instr.getKind()) : nullptr;
-  instrName = instrName ? instrName : Instr::kindName(instr.getKind());
-  std::cout << instrName;
+  preInstrCallback(instr);
+  const ArchInstr *archInstr =
+      arch ? arch->getArchInstr(instr.getKind()) : nullptr;
+  const char *name =
+      archInstr ? archInstr->name : Instr::kindName(instr.getKind());
+  std::cout << name;
   for (auto &op : instr) {
     std::cout << " ";
     dispatch(op);
@@ -102,12 +115,12 @@ void PrintIRVisitor::visitOperand(Operand &op) {
     std::cout << "unnamed";
     break;
   case Operand::REG_USE:
-    assert(arch->getRegisterKindName(op.reg()));
-    std::cout << arch->getRegisterKindName(op.reg());
+    printReg(op.reg());
     break;
   case Operand::REG_DEF:
-    assert(arch->getRegisterKindName(op.reg()));
-    std::cout << "def(" << arch->getRegisterKindName(op.reg()) << ")";
+    std::cout << "def(";
+    printReg(op.reg());
+    std::cout << ")";
     break;
   case Operand::TYPE:
     printSSAType(op.type());
@@ -136,8 +149,6 @@ void PrintIRVisitor::visitOperand(Operand &op) {
 }
 
 void NumberingIRVisitor::visitFunction(Function &func) {
-  ssaDefs.clear();
-  nextSSADefNum = 0;
   for (auto &block : func) {
     defNum(block.getDef());
   }
@@ -151,10 +162,9 @@ void NumberingIRVisitor::visitOperandSSADef(Operand &op) { defNum(op); }
 unsigned NumberingIRVisitor::defNum(Operand &op) {
   auto [it, succ] = ssaDefs.insert(std::make_pair(&op, nextSSADefNum));
   if (succ) {
-    return nextSSADefNum++;
-  } else {
-    return it->second;
+    ++nextSSADefNum;
   }
+  return it->second;
 }
 
 std::optional<unsigned> NumberingIRVisitor::getNum(Operand &op) {

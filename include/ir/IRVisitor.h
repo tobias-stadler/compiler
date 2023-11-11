@@ -37,8 +37,6 @@ public:
     switch (op.getKind()) {
     case Operand::SSA_DEF_TYPE:
     case Operand::SSA_DEF_REGCLASS:
-    case Operand::SSA_DEF_BLOCK:
-    case Operand::SSA_DEF_FUNCTION:
       impl().visitOperandSSADef(op);
       break;
     case Operand::SSA_USE:

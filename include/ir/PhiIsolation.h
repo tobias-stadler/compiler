@@ -2,8 +2,11 @@
 
 #include "ir/IRPass.h"
 #include "ir/InstrBuilder.h"
+#include "ir/RegTracking.h"
 
 class PhiIsolationPass : public IRPass<Function> {
+  const char *name() override { return "PhiIsolationPass"; }
+
   void run(Function &func, IRInfo<Function> &info) override {
     for (auto &block : func) {
       for (auto &instr : block) {
@@ -24,6 +27,31 @@ class PhiIsolationPass : public IRPass<Function> {
       }
     }
   }
+};
 
-  const char *name() override { return "PhiIsolationPass"; }
+class PhiDestructionPass : public IRPass<Function> {
+  const char *name() override { return "PhiDestructionPass"; }
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    auto &regTrack = info.query<RegTracking>();
+
+    for (auto &block : func) {
+      for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
+        auto &instr = *it;
+        ++it;
+        if (!instr.isPhi()) {
+          break;
+        }
+        auto phi = PhiInstrPtr(&instr);
+        for (unsigned i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
+          auto &def = phi.getPredecessorDef(i);
+          regTrack.lowerSSADef(def);
+        }
+        regTrack.lowerSSADef(instr.getDef());
+        instr.deleteThis();
+      }
+    }
+
+    info.preserve<RegTracking>();
+  }
 };

@@ -12,6 +12,7 @@ void DominatorTreePass::run(Function &func, IRInfo<Function> &info) {
   computeSemiDominators();
   computeImmDominators();
   info.publish(*tree);
+  info.preserveAll();
 }
 
 void DominatorTreePass::invalidate(IRInfo<Function> &info) {
@@ -106,4 +107,5 @@ void PrintDominatorTreePass::run(Function &, IRInfo<Function> &info) {
               << ", iDom: " << domTree.immDominator[i] << "\n";
   }
   std::cout << "----\n";
+  info.preserveAll();
 }

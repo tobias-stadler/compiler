@@ -84,6 +84,29 @@ class Function;
 class Operand;
 class Program;
 
+class Reg {
+public:
+  friend class std::hash<Reg>;
+  using num_t = unsigned;
+
+  constexpr Reg(num_t num) : num(num) {}
+
+  friend bool operator==(Reg a, Reg b) { return a.num == b.num; }
+
+  explicit operator bool() { return num; }
+
+  operator num_t() { return num; }
+
+  num_t getNum() const { return num; }
+
+private:
+  num_t num;
+};
+
+template <> struct std::hash<Reg> {
+  size_t operator()(const Reg &reg) const { return reg.num; }
+};
+
 class BrCond {
 public:
   enum Kind { EQ, NE, LT, LTU, LE, LEU, GT, GTU, GE, GEU };
@@ -203,6 +226,7 @@ public:
 
   void unlinkAllUses();
   void replaceAllUses(Operand &newDef);
+  void replaceAllUses(Reg reg);
 
   class iterator {
   public:
@@ -316,6 +340,9 @@ public:
     }
   }
   static constexpr bool kindIsSSAUse(Kind kind) { return kind == SSA_USE; }
+  static constexpr bool kindIsReg(Kind kind) {
+    return kind == REG_DEF || kind == REG_USE;
+  }
   static constexpr bool kindIsDef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
@@ -342,30 +369,26 @@ public:
     case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
-      assert(false && "Cannot copy SSA Def");
-      break;
     case SSA_USE:
-      if (o.ssaUse().def) {
-        emplace<SSA_USE>(o.parent, o.ssaUse().getDef());
-      }
+      assert(false && "Cannot copy SSA operand");
       break;
     case REG_DEF:
-      emplace<REG_DEF>(o.parent, o.contentReg);
+      emplaceRaw<REG_DEF>(o.contentReg);
       break;
     case REG_USE:
-      emplace<REG_USE>(o.parent, o.contentReg);
+      emplaceRaw<REG_USE>(o.contentReg);
       break;
     case BLOCK:
-      emplace<BLOCK>(o.parent, o.contentBlock);
+      emplaceRaw<BLOCK>(o.contentBlock);
       break;
     case TYPE:
-      emplace<TYPE>(o.parent, o.contentType);
+      emplaceRaw<TYPE>(o.contentType);
       break;
     case IMM32:
-      emplace<IMM32>(o.parent, o.contentImm32);
+      emplaceRaw<IMM32>(o.contentImm32);
       break;
     case BRCOND:
-      emplace<BRCOND>(o.parent, o.contentBrCond);
+      emplaceRaw<BRCOND>(o.contentBrCond);
       break;
     case CHAIN:
       assert(false && "Don't copy chain!");
@@ -379,7 +402,14 @@ public:
 
   void destroy() {
     switch (kind) {
-    default:
+    case EMPTY:
+    case BLOCK:
+    case TYPE:
+    case IMM32:
+      break;
+    case REG_DEF:
+    case REG_USE:
+      contentReg.~Reg();
       break;
     case SSA_DEF_TYPE:
     case SSA_DEF_REGCLASS:
@@ -393,22 +423,23 @@ public:
     case CHAIN:
       contentChain.~OperandChain();
       break;
+    case BRCOND:
+      contentBrCond.~BrCond();
+      break;
     }
     kind = EMPTY;
-    parent = nullptr;
   }
 
-  template <Kind K, typename... ARGS>
-  void emplace(Instr *parent, ARGS &&...args) {
+  template <Kind K, typename... ARGS> void emplaceRaw(ARGS &&...args) {
     destroy();
     if constexpr (kindIsSSADef(K)) {
       new (&contentDef) SSADef(std::forward<ARGS>(args)...);
     } else if constexpr (K == SSA_USE) {
       new (&contentUse) SSAUse(std::forward<ARGS>(args)...);
     } else if constexpr (K == REG_DEF) {
-      new (&contentReg) unsigned(std::forward<ARGS>(args)...);
+      new (&contentReg) Reg(std::forward<ARGS>(args)...);
     } else if constexpr (K == REG_USE) {
-      new (&contentReg) unsigned(std::forward<ARGS>(args)...);
+      new (&contentReg) Reg(std::forward<ARGS>(args)...);
     } else if constexpr (K == IMM32) {
       new (&contentImm32) int32_t(std::forward<ARGS>(args)...);
     } else if constexpr (K == BRCOND) {
@@ -424,6 +455,11 @@ public:
       static_assert(false, "Operand kind cannot be emplaced with these args");
     }
     kind = K;
+  }
+
+  template <Kind K, typename... ARGS>
+  void emplace(Instr *parent, ARGS &&...args) {
+    emplaceRaw<K>(std::forward<ARGS>(args)...);
     this->parent = parent;
   }
 
@@ -456,6 +492,11 @@ public:
   Function &ssaDefFunction() {
     assert(kind == SSA_DEF_FUNCTION);
     return *ssaDef().contentFunction;
+  }
+
+  void ssaDefReplace(Reg reg) {
+    ssaDef().replaceAllUses(reg);
+    emplaceRaw<REG_DEF>(reg);
   }
 
   Block &block() const {
@@ -517,10 +558,12 @@ public:
     return contentImm32;
   }
 
-  unsigned reg() const {
-    assert(kind == REG_DEF || kind == REG_USE);
+  Reg reg() const {
+    assert(kindIsReg(kind));
     return contentReg;
   }
+
+  void setParent(Instr *instr) { parent = instr; }
 
   Instr &getParent() const {
     assert(parent);
@@ -529,9 +572,15 @@ public:
 
   Block &getParentBlock() const;
 
+  bool isReg() const { return kindIsReg(kind); }
+  bool isRegDef() const { return kind == REG_DEF; }
+  bool isRegUse() const { return kind == REG_USE; }
   bool isSSADef() const { return kindIsSSADef(kind); }
   bool isSSARegDef() const { return kindIsSSARegDef(kind); }
   bool isSSAUse() const { return kindIsSSAUse(kind); }
+  bool isSSARegUse() const {
+    return isSSAUse() && ssaUse().getDef().isSSARegDef();
+  }
 
 private:
   Kind kind = EMPTY;
@@ -540,7 +589,7 @@ private:
     SSADef contentDef;
     SSAUse contentUse;
     OperandChain contentChain;
-    unsigned contentReg;
+    Reg contentReg;
     int32_t contentImm32;
     Block *contentBlock;
     SSAType *contentType;
@@ -627,14 +676,14 @@ public:
     STORE,
     ALLOCA,
     INSTR_END,
-    TARGET_INSTR,
+    ARCH_INSTR,
   };
 
   static constexpr bool kindIsInstr(unsigned kind) {
     return kind > INSTR_START && kind < INSTR_END;
   }
   static constexpr bool kindIsTarget(unsigned kind) {
-    return kind > TARGET_INSTR;
+    return kind > ARCH_INSTR;
   }
 
   static constexpr bool kindIsArtifact(unsigned kind) {

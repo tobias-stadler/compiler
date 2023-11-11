@@ -15,11 +15,11 @@ namespace riscv {
 
 class Arch : public ::Arch {
 public:
-  const char *getInstrKindName(unsigned kind) override {
-    return riscv::instrKindName(kind);
+  const ArchReg *getArchReg(unsigned kind) override {
+    return riscv::getArchReg(kind);
   }
-  const char *getRegisterKindName(unsigned kind) override {
-    return riscv::registerKindName(kind);
+  const ArchInstr *getArchInstr(unsigned kind) override {
+    return riscv::getArchInstr(kind);
   }
 };
 
@@ -38,7 +38,9 @@ class PreISelCombine : public IRPatExecutor {
 class BranchLoweringPass : public IRPass<Function>,
                            public IRVisitor<BranchLoweringPass> {
 public:
-  void run(Function &func, IRInfo<Function> &info) override { dispatch(func); }
+  void run(Function &func, IRInfo<Function> &info) override {
+    dispatch(func);
+  }
 
   void visitInstr(Instr &instr) {
     switch (instr.getKind()) {
@@ -68,11 +70,11 @@ public:
     i.deleteThis();
   }
 
-  const char *name() override { return "RiscVBranchLowering"; }
+  const char *name() override { return "RiscVBranchLoweringPass"; }
 };
 
-class AsmPrinter : public IRPass<Program> {
-  const char *name() override { return "RiscVAsmPrinter"; }
+class AsmPrinterPass : public IRPass<Program> {
+  const char *name() override { return "RiscVAsmPrinterPass"; }
   void run(Program &obj, IRInfo<Program> &info) override {}
 
   void printFunction(Function &func) {}

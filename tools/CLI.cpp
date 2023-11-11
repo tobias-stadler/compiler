@@ -14,6 +14,7 @@
 #include <ir/InstrBuilder.h>
 #include <ir/PhiIsolation.h>
 #include <ir/RegLiveness.h>
+#include <ir/RegTracking.h>
 #include <memory>
 #include <riscv/Arch.h>
 #include <string>
@@ -51,17 +52,15 @@ int main(int argc, char *argv[]) {
   auto &func = *prog->functions[0];
 
   riscv::Arch arch;
-  IRPipeline<Function> pipeline;
+  IRPipeline<Function> pipeline(&arch);
 
-  /*
-  pipeline.addLazyPass(std::make_unique<PrintIRPass>());
   pipeline.addLazyPass(std::make_unique<DominatorTreePass>());
-  pipeline.addLazyPass(std::make_unique<RegLivenessPass>());
-  pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
-  pipeline.addPass(std::make_unique<PrintRegLivenessPass>());
-  pipeline.addPass(std::make_unique<PhiIsolationPass>());
-  */
+  pipeline.addLazyPass(std::make_unique<LivenessFlowPass>());
+  pipeline.addLazyPass(std::make_unique<LiveIntervalsPass>());
+
   pipeline.addPass(std::make_unique<PrintIRPass>());
+  // pipeline.addPass(std::make_unique<PrintIRPass>());
+  // pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
 
   riscv::PreISelExpansion expansion;
   riscv::PreISelCombine combine;
@@ -70,7 +69,15 @@ int main(int argc, char *argv[]) {
   pipeline.addPass(std::make_unique<InstrCombinePass>(combine));
   pipeline.addPass(std::make_unique<InstrSelectPass>(isel));
   pipeline.addPass(std::make_unique<riscv::BranchLoweringPass>());
-  pipeline.addPass(std::make_unique<PrintIRPass>(&arch));
+  pipeline.addPass(std::make_unique<PhiIsolationPass>());
+  pipeline.addPass(std::make_unique<RegTrackingPass>());
+  pipeline.addPass(std::make_unique<PhiDestructionPass>());
+
+  pipeline.addPass(std::make_unique<PrintIRPass>());
+  pipeline.addPass(std::make_unique<PrintLivenessFlowPass>());
+  pipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
+  pipeline.addPass(std::make_unique<PrintRegTrackingPass>());
+
   pipeline.run(func);
   return EXIT_SUCCESS;
 }
