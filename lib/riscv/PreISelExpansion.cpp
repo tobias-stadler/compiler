@@ -92,7 +92,9 @@ bool PreISelExpansion::execute(Instr &instr) {
                      {&instr.getOperand(2), &instr.getOperand(3)});
     break;
   }
-  dslExecutePat(instr);
+  if (dslExecutePat(instr)) {
+    instr.deleteThis();
+  }
   return true;
 }
 } // namespace riscv

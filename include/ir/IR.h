@@ -91,13 +91,13 @@ public:
 
   constexpr Reg(num_t num) : num(num) {}
 
-  friend bool operator==(Reg a, Reg b) { return a.num == b.num; }
+  constexpr friend bool operator==(Reg a, Reg b) { return a.num == b.num; }
 
-  explicit operator bool() { return num; }
+  constexpr explicit operator bool() const { return num; }
 
-  operator num_t() { return num; }
+  constexpr operator num_t() const { return num; }
 
-  num_t getNum() const { return num; }
+  constexpr num_t getNum() const { return num; }
 
 private:
   num_t num;
@@ -860,7 +860,7 @@ public:
   }
 
   bool isPhi() { return kind == PHI; }
-  bool isArtifact() { return kindIsTarget(kind); }
+  bool isArtifact() { return kindIsArtifact(kind); }
   bool isTarget() { return kindIsTarget(kind); }
 
 private:

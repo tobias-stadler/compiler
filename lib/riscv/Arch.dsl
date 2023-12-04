@@ -34,7 +34,9 @@ let X29 = Reg {}
 let X30 = Reg {}
 let X31 = Reg {}
 
-let GPR = RegClass {}
+let GPR = RegClass {
+  let regs = dsl_list {X1 X2 X3}
+}
 
 
 let LUI = Instr {}

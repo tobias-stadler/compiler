@@ -8,6 +8,7 @@
 #include "ir/InstrBuilder.h"
 #include <cassert>
 #include <initializer_list>
+#include <array>
 
 namespace riscv {
 
@@ -20,6 +21,9 @@ public:
   }
   const ArchInstr *getArchInstr(unsigned kind) override {
     return riscv::getArchInstr(kind);
+  }
+  const ArchRegClass *getArchRegClass(unsigned kind) override {
+    return riscv::getArchRegClass(kind);
   }
 };
 
@@ -38,9 +42,7 @@ class PreISelCombine : public IRPatExecutor {
 class BranchLoweringPass : public IRPass<Function>,
                            public IRVisitor<BranchLoweringPass> {
 public:
-  void run(Function &func, IRInfo<Function> &info) override {
-    dispatch(func);
-  }
+  void run(Function &func, IRInfo<Function> &info) override { dispatch(func); }
 
   void visitInstr(Instr &instr) {
     switch (instr.getKind()) {

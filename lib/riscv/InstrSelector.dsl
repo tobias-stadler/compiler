@@ -15,7 +15,7 @@ ir_pat {
     $TCInt::canTrunc<12>($ #imm $.imm32())$
   }
   emit {
-    riscv::OUT def(%arith,i32) %lhs #imm;
+    riscv::OUT def(%arith,riscv::GPR) %lhs #imm;
   }
 }
 ir_pat {
@@ -27,7 +27,7 @@ ir_pat {
     $TCInt::canTrunc<12>($ #imm $.imm32())$
   }
   emit {
-    riscv::OUT def(%arith,i32) %lhs #imm;
+    riscv::OUT def(%arith,riscv::GPR) %lhs #imm;
   }
 }
 }
@@ -38,7 +38,7 @@ ir_pat {
     IN def(%arith,i32) %lhs %rhs;
   }
   emit {
-    riscv::OUT def(%arith,i32) %lhs %rhs;
+    riscv::OUT def(%arith,riscv::GPR) %lhs %rhs;
   }
 }
 }
@@ -73,7 +73,7 @@ ir_pat {
     EXT_Z def(%ext,i32) %cmp;
   }
   emit {
-    riscv::OUT def(%ext,i32) %lhs %rhs;
+    riscv::OUT def(%ext,riscv::GPR) %lhs %rhs;
   }
 }
 }
@@ -88,7 +88,7 @@ ir_pat {
     $TCInt::canTrunc<12>($ #imm $.imm32())$
   }
   emit {
-    riscv::OUT def(%ext,i32) %lhs #imm;
+    riscv::OUT def(%ext,riscv::GPR) %lhs #imm;
   }
 }
 }
@@ -117,8 +117,8 @@ ir_pat {
     %src $.ssaDefType() == IntSSAType::get(32)$
   }
   emit {
-    riscv::SLLI def(%sl,i32) %src imm32($selectExtShiftBits($ %tr $)$);
-    riscv::OUT def(%dst,i32) %sl imm32($selectExtShiftBits($ %tr $)$);
+    riscv::SLLI def(%sl,riscv::GPR) %src imm32($selectExtShiftBits($ %tr $)$);
+    riscv::OUT def(%dst,riscv::GPR) %sl imm32($selectExtShiftBits($ %tr $)$);
   }
 }
 }
@@ -136,7 +136,32 @@ ir_pat {
 }
 
 let preISelExpansion = IRPatExecutor {
-
+ir_pat {
+  match {
+    LOAD def(%dst,i32) %addr;
+  }
+  emit {
+    riscv::LW def(%dst,i32) %addr;
+  }
+}
+ir_pat {
+  match {
+    LOAD def(%dst,i16) %addr;
+  }
+  emit {
+    riscv::LH def(%ld,i32) %addr;
+    TRUNC def(%dst,i16) %ld;
+  }
+}
+ir_pat {
+  match {
+    LOAD def(%dst,i8) %addr;
+  }
+  emit {
+    riscv::LB def(%ld,i32) %addr;
+    TRUNC def(%dst,i8) %ld;
+  }
+}
 }
 
 let preISelCombine = IRPatExecutor {
@@ -197,25 +222,27 @@ ir_pat {
     $TCInt::canTrunc<12>($ #imm $.imm32())$
   }
   emit {
-    riscv::ADDI def(%c,i32) riscv::X0 #imm;
+    riscv::ADDI def(%c,riscv::GPR) riscv::X0 #imm;
   }
 }
 ir_pat {
   match {
     CONST_INT def(%c,i32) imm32(0);
     CMP def(%cmp,i1) eq %lhs %c;
+    EXT_Z def(%ext,i32) %cmp;
   }
   emit {
-    riscv::SLTIU def(%cmp,i32) %lhs imm32(1);
+    riscv::SLTIU def(%ext,riscv::GPR) %lhs imm32(1);
   }
 }
 ir_pat {
   match {
     CONST_INT def(%c,i32) imm32(0);
     CMP def(%cmp,i1) eq %c %lhs;
+    EXT_Z def(%ext,i32) %cmp;
   }
   emit {
-    riscv::SLTIU def(%cmp,i1) %lhs imm32(1);
+    riscv::SLTIU def(%ext,riscv::GPR) %lhs imm32(1);
   }
 }
 ir_pat {
@@ -311,7 +338,7 @@ ir_pat {
     #imm $.imm32() > INT32_MIN && TCInt::canTrunc<12>(-$ #imm $.imm32())$
   }
   emit {
-    riscv::ADDI def(%arith,i32) %lhs imm32($-$#imm$.imm32()$);
+    riscv::ADDI def(%arith,riscv::GPR) %lhs imm32($-$#imm$.imm32()$);
   }
 }
 !ArithImmPat {
@@ -364,33 +391,6 @@ ir_pat {
   let OUT = token {SRA}
 }
 
-ir_pat {
-  match {
-    LOAD def(%dst,i32) %addr;
-  }
-  emit {
-    riscv::LW def(%dst,i32) %addr;
-  }
-}
-ir_pat {
-  match {
-    LOAD def(%dst,i16) %addr;
-  }
-  emit {
-    riscv::LH def(%ld,i32) %addr;
-    TRUNC def(%dst,i16) %ld;
-  }
-}
-ir_pat {
-  match {
-    LOAD def(%dst,i8) %addr;
-  }
-  emit {
-    riscv::LB def(%ld,i32) %addr;
-    TRUNC def(%dst,i8) %ld;
-  }
-}
-
 !StorePat {
   let TY = token {32}
   let OUT = token {SW}
@@ -405,4 +405,3 @@ ir_pat {
 }
 
 }
-

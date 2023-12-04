@@ -69,14 +69,15 @@ int main(int argc, char *argv[]) {
   pipeline.addPass(std::make_unique<InstrCombinePass>(combine));
   pipeline.addPass(std::make_unique<InstrSelectPass>(isel));
   pipeline.addPass(std::make_unique<riscv::BranchLoweringPass>());
+  pipeline.addPass(std::make_unique<PrintIRPass>());
   pipeline.addPass(std::make_unique<PhiIsolationPass>());
   pipeline.addPass(std::make_unique<RegTrackingPass>());
   pipeline.addPass(std::make_unique<PhiDestructionPass>());
 
   pipeline.addPass(std::make_unique<PrintIRPass>());
+  pipeline.addPass(std::make_unique<PrintRegTrackingPass>());
   pipeline.addPass(std::make_unique<PrintLivenessFlowPass>());
   pipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
-  pipeline.addPass(std::make_unique<PrintRegTrackingPass>());
 
   pipeline.run(func);
   return EXIT_SUCCESS;

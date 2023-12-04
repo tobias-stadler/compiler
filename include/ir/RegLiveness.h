@@ -3,33 +3,19 @@
 #include "ir/IRPass.h"
 #include "ir/IRPrinter.h"
 #include "ir/InstrBuilder.h"
+#include "ir/RegTracking.h"
 #include <cassert>
 #include <compare>
 #include <iostream>
 #include <ranges>
 #include <unordered_set>
 
-template <typename T> class BlockLiveness {
-public:
-  std::unordered_set<T> liveIn;
-  std::unordered_set<T> liveOut;
-  std::vector<T> liveOutNew;
-  std::unordered_set<T> defs;
-};
-
 class BlockLivenessFlow {
 public:
-  BlockLiveness<Operand *> ssa;
-  BlockLiveness<Reg> reg;
-
-  template <typename T> BlockLiveness<T> &get() {
-    if constexpr (std::is_same_v<T, Operand *>) {
-      return ssa;
-    }
-    if constexpr (std::is_same_v<T, Reg>) {
-      return reg;
-    }
-  }
+  std::unordered_set<Reg> liveIn;
+  std::unordered_set<Reg> liveOut;
+  std::vector<Reg> liveOutNew;
+  std::unordered_set<Reg> defs;
 };
 
 class LivenessFlow {
@@ -45,6 +31,7 @@ public:
   void run(Function &func, IRInfo<Function> &info) override {
     data.blockLiveness.clear();
     arch = &info.getArch();
+    regTrack = &info.query<RegTracking>();
 
     std::vector<Block *> workList;
     for (auto &block : func) {
@@ -54,15 +41,13 @@ public:
     while (!workList.empty()) {
       auto &block = *workList.back();
       workList.pop_back();
-      dataflowStep<Operand *>(block, workList);
-      dataflowStep<Reg>(block, workList);
+      dataflowStep(block, workList);
     }
     info.publish(data);
     info.preserveAll();
   }
 
   void precomputeBlock(Block &block) {
-    std::unordered_set<Operand *> ssaExposedDefs;
     std::unordered_set<Reg> regExposed;
     auto &blockLive = data.blockLiveness[&block];
     for (auto &instr : block | std::views::reverse) {
@@ -70,18 +55,21 @@ public:
         auto phi = PhiInstrPtr(&instr);
         for (int i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
           auto &predBlockLive = data.blockLiveness[&phi.getPredecessorBlock(i)];
-          predBlockLive.ssa.liveOutNew.push_back(&phi.getPredecessorDef(i));
+          predBlockLive.liveOutNew.push_back(
+              regTrack->getRegForSSADef(phi.getPredecessorDef(i)));
         }
-        blockLive.ssa.liveIn.insert(&instr.getDef());
-        ssaExposedDefs.erase(&instr.getDef());
+        Reg reg = regTrack->getRegForSSADef(instr.getDef());
+        blockLive.liveIn.insert(reg);
+        regExposed.erase(reg);
         continue;
       }
       for (auto &op : instr) {
         if (op.isSSARegUse()) {
-          ssaExposedDefs.insert(&op.ssaUse().getDef());
+          regExposed.insert(regTrack->getRegForSSADef(op.ssaUse().getDef()));
         } else if (op.isSSARegDef()) {
-          blockLive.ssa.defs.insert(&op);
-          ssaExposedDefs.erase(&op);
+          Reg reg = regTrack->getRegForSSADef(op);
+          blockLive.defs.insert(reg);
+          regExposed.erase(reg);
         } else if (op.isRegUse()) {
           if (ignoreReg(*arch, op.reg()))
             continue;
@@ -89,21 +77,17 @@ public:
         } else if (op.isRegDef()) {
           if (ignoreReg(*arch, op.reg()))
             continue;
-          blockLive.reg.defs.insert(op.reg());
+          blockLive.defs.insert(op.reg());
           regExposed.erase(op.reg());
         }
       }
     }
-    blockLive.ssa.liveIn.insert(ssaExposedDefs.begin(), ssaExposedDefs.end());
-    blockLive.reg.liveIn.insert(regExposed.begin(), regExposed.end());
+    blockLive.liveIn.insert(regExposed.begin(), regExposed.end());
     for (auto &blockUse : block.getDef().ssaDef()) {
       Block &pred = blockUse.getParentBlock();
       auto &predBlockLive = data.blockLiveness[&pred];
-      predBlockLive.ssa.liveOutNew.insert(predBlockLive.ssa.liveOutNew.end(),
-                                          ssaExposedDefs.begin(),
-                                          ssaExposedDefs.end());
-      predBlockLive.reg.liveOutNew.insert(predBlockLive.reg.liveOutNew.end(),
-                                          regExposed.begin(), regExposed.end());
+      predBlockLive.liveOutNew.insert(predBlockLive.liveOutNew.end(),
+                                      regExposed.begin(), regExposed.end());
     }
   }
 
@@ -112,9 +96,8 @@ public:
     return archReg ? archReg->noLiveness : false;
   }
 
-  template <typename T>
   void dataflowStep(Block &block, std::vector<Block *> &workList) {
-    auto &blockLive = data.blockLiveness[&block].get<T>();
+    auto &blockLive = data.blockLiveness[&block];
     for (auto op : blockLive.liveOutNew) {
       if (!blockLive.liveOut.insert(op).second) {
         continue;
@@ -127,7 +110,7 @@ public:
       }
       for (auto &blockUse : block.getDef().ssaDef()) {
         Block &pred = blockUse.getParentBlock();
-        auto &predBlockLive = data.blockLiveness[&pred].get<T>();
+        auto &predBlockLive = data.blockLiveness[&pred];
         predBlockLive.liveOutNew.push_back(op);
         workList.push_back(&pred);
       }
@@ -147,6 +130,7 @@ public:
 private:
   LivenessFlow data;
   Arch *arch;
+  RegTracking *regTrack;
 };
 
 class PrintLivenessFlowPass : public IRPass<Function> {
@@ -161,26 +145,13 @@ class PrintLivenessFlowPass : public IRPass<Function> {
       printer.printNumberedDef(block.getDef());
       std::cout << ":\n";
 
-      std::cout << "SSALiveIn:";
-      print(blockLive.ssa.liveIn, printer);
-      std::cout << "SSALiveOut:";
-      print(blockLive.ssa.liveOut, printer);
-
-      std::cout << "RegLiveIn:";
-      print(blockLive.reg.liveIn, printer);
-      std::cout << "RegLiveOut:";
-      print(blockLive.reg.liveOut, printer);
+      std::cout << "LiveIn:";
+      print(blockLive.liveIn, printer);
+      std::cout << "LiveOut:";
+      print(blockLive.liveOut, printer);
     }
     std::cout << "----\n";
     info.preserveAll();
-  }
-
-  void print(std::unordered_set<Operand *> ops, PrintIRVisitor &printer) {
-    for (auto x : ops) {
-      std::cout << " ";
-      printer.printNumberedDef(*x);
-    }
-    std::cout << "\n";
   }
 
   void print(std::unordered_set<Reg> regs, PrintIRVisitor &printer) {
@@ -259,8 +230,7 @@ public:
   static const IRInfoID ID;
   std::unordered_map<void *, size_t> numbering;
   size_t currNum = 0;
-  std::unordered_map<Operand *, LiveInterval> ssaIntervals;
-  std::unordered_map<Reg, LiveInterval> regIntervals;
+  std::unordered_map<Reg, LiveInterval> intervals;
 
   void number(void *ptr) {
     currNum += 10;
@@ -286,6 +256,7 @@ class LiveIntervalsPass : public IRPass<Function> {
   void run(Function &func, IRInfo<Function> &info) override {
     arch = &info.getArch();
     data = LiveIntervals();
+    regTrack = &info.query<RegTracking>();
     flow = &info.query<LivenessFlow>();
     numberInstructions(func);
     buildIntervals(func);
@@ -306,52 +277,51 @@ class LiveIntervalsPass : public IRPass<Function> {
   void buildIntervals(Function &func) {
     for (auto &block : func | std::views::reverse) {
       auto &blockLive = flow->blockLiveness[&block];
-      auto ssaLive = blockLive.ssa.liveOut;
-      auto regLive = blockLive.reg.liveOut;
+      auto live = blockLive.liveOut;
       auto blockIn = data.getNumLiveIn(block);
       auto blockOut = data.getNumLiveOut(block);
-      for (auto reg : ssaLive) {
-        data.ssaIntervals[reg].addRangeCoalesceBegin(blockIn, blockOut);
-      }
-      for (auto reg : regLive) {
-        data.regIntervals[reg].addRangeCoalesceBegin(blockIn, blockOut);
+      for (auto reg : live) {
+        data.intervals[reg].addRangeCoalesceBegin(blockIn, blockOut);
       }
       for (auto &instr : block | std::views::reverse) {
         if (instr.isPhi())
           continue;
         for (auto &op : instr) {
-          auto instrNum = data.getNumInstr(instr);
           if (op.isSSARegUse()) {
-            if (ssaLive.insert(&op.ssaUse().getDef()).second) {
-              data.ssaIntervals[&op.ssaUse().getDef()].addRangeCoalesceBegin(
-                  blockIn, instrNum);
-            }
+            Reg reg = regTrack->getRegForSSADef(op.ssaUse().getDef());
+            useReg(reg, instr, live);
           } else if (op.isSSARegDef()) {
-            if (ssaLive.erase(&op)) {
-              data.ssaIntervals[&op].updateFromBegin(instrNum);
-            } else {
-              data.ssaIntervals[&op].addRangeCoalesceBegin(
-                  instrNum, {instrNum, LivePos::LATE});
-            }
+            Reg reg = regTrack->getRegForSSADef(op);
+            defReg(reg, instr, live);
           } else if (op.isRegUse()) {
             if (LivenessFlowPass::ignoreReg(*arch, op.reg()))
               continue;
-            if (regLive.insert(op.reg()).second) {
-              data.regIntervals[op.reg()].addRangeCoalesceBegin(blockIn,
-                                                                instrNum);
-            }
+            useReg(op.reg(), instr, live);
           } else if (op.isRegDef()) {
             if (LivenessFlowPass::ignoreReg(*arch, op.reg()))
               continue;
-            if (regLive.erase(op.reg())) {
-              data.regIntervals[op.reg()].updateFromBegin(instrNum);
-            } else {
-              data.regIntervals[op.reg()].addRangeCoalesceBegin(
-                  instrNum, {instrNum, LivePos::LATE});
-            }
+            defReg(op.reg(), instr, live);
           }
         }
       }
+    }
+  }
+
+  void useReg(Reg reg, Instr &instr, std::unordered_set<Reg> &live) {
+    auto blockIn = data.getNumLiveIn(instr.getParent());
+    auto instrNum = data.getNumInstr(instr);
+    if (live.insert(reg).second) {
+      data.intervals[reg].addRangeCoalesceBegin(blockIn, instrNum);
+    }
+  }
+
+  void defReg(Reg reg, Instr &instr, std::unordered_set<Reg> &live) {
+    auto instrNum = data.getNumInstr(instr);
+    if (live.erase(reg)) {
+      data.intervals[reg].updateFromBegin(instrNum);
+    } else {
+      data.intervals[reg].addRangeCoalesceBegin(instrNum,
+                                                {instrNum, LivePos::LATE});
     }
   }
 
@@ -364,6 +334,7 @@ class LiveIntervalsPass : public IRPass<Function> {
   }
 
   LivenessFlow *flow;
+  RegTracking *regTrack;
   Arch *arch;
   LiveIntervals data;
 };
@@ -378,8 +349,8 @@ class PrintLiveIntervalsPass : public IRPass<Function> {
         [&](Instr &i) { std::cout << live.getNumInstr(i) << ": "; });
     printer.dispatch(obj);
     std::cout << "-- LiveIntervals --\n";
-    for (auto &[reg, interval] : live.ssaIntervals) {
-      printer.printNumberedDef(*reg);
+    for (auto &[reg, interval] : live.intervals) {
+      printer.printReg(reg);
       std::cout << ":";
       printInterval(interval);
       std::cout << "\n";

@@ -42,12 +42,15 @@ class PhiDestructionPass : public IRPass<Function> {
         if (!instr.isPhi()) {
           break;
         }
+        Reg reg = regTrack.getRegForSSADef(instr.getDef());
+        regTrack.lowerSSADef(reg);
         auto phi = PhiInstrPtr(&instr);
         for (unsigned i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
           auto &def = phi.getPredecessorDef(i);
-          regTrack.lowerSSADef(def);
+          regTrack.lowerSSADef(regTrack.getRegForSSADef(def));
+          def.ssaDefReplace(reg);
         }
-        regTrack.lowerSSADef(instr.getDef());
+        instr.getDef().ssaDefReplace(reg);
         instr.deleteThis();
       }
     }

@@ -35,11 +35,10 @@ public:
     return it->second;
   }
 
-  void lowerSSADef(Operand &def) {
-    Reg reg = getRegForSSADef(def);
-    assert(reg);
-    auto &regInfo = getVRegInfo(getRegForSSADef(def));
+  void lowerSSADef(Reg reg) {
+    auto &regInfo = getVRegInfo(reg);
     assert(regInfo.kind == TRACKING_SSA_DEF);
+    auto &def = *regInfo.contentSSADef;
     switch (def.getKind()) {
     case Operand::SSA_DEF_TYPE:
       regInfo.kind = TYPE;
@@ -52,8 +51,12 @@ public:
     default:
       break;
     }
-    def.ssaDefReplace(reg);
+    ssaDefToReg.erase(&def);
   }
+
+  size_t getNumVRegs() { return vRegs.size(); }
+
+  Reg getFirstVReg() { return firstVReg; }
 
   Reg createVReg(SSAType &type) {
     auto &reg = vRegs.emplace_back(type);
@@ -136,6 +139,7 @@ class PrintRegTrackingPass : public IRPass<Function> {
         printer.printNumberedDef(*reg.contentSSADef);
         break;
       case RegTracking::REGCLASS:
+        printer.printRegClass(reg.contentRegClass);
         break;
       case RegTracking::TYPE:
         printer.printSSAType(*reg.contentType);

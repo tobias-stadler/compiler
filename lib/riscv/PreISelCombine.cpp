@@ -13,7 +13,7 @@ bool PreISelCombine::execute(Instr &instr) {
     return false;
   }
   instr.deleteThis();
-  return false;
+  return true;
 }
 
 } // namespace riscv

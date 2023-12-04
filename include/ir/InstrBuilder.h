@@ -44,7 +44,6 @@ public:
   bool isComplete() { return instr->getChainOperand().chain().isAllocated(); }
 
   void setPredecessor(unsigned n, Operand &def, Block &pred) {
-    assert(def.ssaDefType() == instr->getDef().ssaDefType());
     OperandChain &chain = instr->getChainOperand().chain();
     chain.getOperand(n * 2).emplace<Operand::SSA_USE>(instr, def);
     chain.getOperand(n * 2 + 1).emplace<Operand::BLOCK>(instr, &pred);
@@ -157,9 +156,14 @@ public:
   }
 
   Instr &emitCopy(Operand &val) {
+    assert(val.isSSARegDef());
     Instr *i = new Instr(Instr::COPY);
     i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
+    if (val.getKind() == Operand::SSA_DEF_TYPE) {
+      i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
+    } else {
+      i->emplaceOperand<Operand::SSA_DEF_REGCLASS>(val.ssaDefRegClass());
+    }
     i->emplaceOperand<Operand::SSA_USE>(val);
     emit(i);
     return *i;

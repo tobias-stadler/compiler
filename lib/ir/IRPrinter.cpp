@@ -54,6 +54,17 @@ void PrintIRVisitor::printReg(Reg reg) {
   std::cout << "@" << reg.getNum();
 }
 
+void PrintIRVisitor::printRegClass(unsigned kind) {
+  if (arch) {
+    const ArchRegClass *archRegClass = arch->getArchRegClass(kind);
+    if (archRegClass) {
+      std::cout << archRegClass->name;
+      return;
+    }
+  }
+  std::cout << "RC" << kind;
+}
+
 void PrintIRVisitor::visitProgram(Program &prog) {
   for (auto &f : prog.functions) {
     std::cout << "---\n";
@@ -105,7 +116,8 @@ void PrintIRVisitor::visitOperand(Operand &op) {
     break;
   case Operand::SSA_DEF_REGCLASS:
     std::cout << "def(%" << numbering.defNum(op) << ",";
-    std::cout << op.ssaDefRegClass() << ")";
+    printRegClass(op.ssaDefRegClass());
+    std::cout << ")";
     break;
   case Operand::SSA_USE:
     printNumberedDef(op.ssaUse().getDef());

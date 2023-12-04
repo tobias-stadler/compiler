@@ -1,1222 +1,11 @@
-#include <algorithm>
-#include <cassert>
-#include <cctype>
-#include <cstdlib>
-#include <filesystem>
 #include <format>
 #include <fstream>
-#include <functional>
-#include <initializer_list>
 #include <iostream>
-#include <iterator>
-#include <memory>
-#include <regex>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
 
-[[noreturn]] void error(std::string_view err) {
-  std::cerr << "[Error] " << err << std::endl;
-  exit(EXIT_FAILURE);
-}
-
-static std::string includeDir;
-
-std::string loadFile(std::string_view fileName) {
-  std::ifstream inFile(std::string(fileName), std::ios::ate);
-  if (!inFile.good()) {
-    error("Couldn't open in file\n");
-  }
-
-  auto sz = inFile.tellg();
-  inFile.seekg(0);
-  std::string str;
-  str.resize(sz);
-  inFile.read(str.data(), sz);
-  return str;
-}
-
-class Token {
-public:
-  enum Kind {
-    EMPTY,
-    CUSTOM,
-    CODE,
-    STR,
-    IDENT,
-    PARENO,
-    PARENC,
-    CURLYO,
-    CURLYC,
-    SQUAREO,
-    SQUAREC,
-    EQ,
-    COMMA,
-    COLON,
-    LT,
-    GT,
-    SLASH_FWD,
-    DOT,
-    SEMICOLON,
-    PERCENT,
-    HASH,
-    AT,
-    EXCLAM,
-  };
-  Kind kind = EMPTY;
-  std::string_view str;
-
-  Token() {}
-
-  Token(Kind kind, std::string_view str) : kind(kind), str(str) {}
-
-  operator std::string_view() { return str; }
-
-  explicit operator bool() { return kind != EMPTY; }
-};
-
-class RecordIdent {
-public:
-  RecordIdent() {}
-  RecordIdent(std::vector<std::string_view> idents)
-      : idents(std::move(idents)) {}
-
-  std::vector<std::string_view> idents;
-
-  std::string_view getName() { return idents.back(); }
-};
-
-class RecordHdr {
-public:
-  std::string_view name;
-  std::string_view type;
-  bool isTemplateInstance = false;
-};
-
-class TokenSource {
-public:
-  virtual Token fetchToken() = 0;
-};
-
-class StringTokenSource : public TokenSource {
-public:
-  std::string_view str;
-  std::string_view::iterator pos;
-
-  StringTokenSource(std::string_view str) : str(str), pos(str.begin()) {}
-
-  Token fetchToken() override {
-    Token tok;
-    if (!eatWhitespace()) {
-      return tok;
-    }
-
-    auto kind = getSingleCharKind();
-    if (kind != Token::EMPTY) {
-      tok.kind = kind;
-      auto tmp = pos++;
-      tok.str = std::string_view(tmp, pos);
-      return tok;
-    }
-
-    static const std::regex identRegEx("([a-zA-Z_0-9]+)");
-    static const std::regex strRegEx("\"(.*)\"");
-    static const std::regex codeRegEx("[$]([^$]+)[$]");
-
-    std::cmatch m;
-    if (std::regex_search(pos, str.end(), m, identRegEx,
-                          std::regex_constants::match_continuous)) {
-      kind = Token::IDENT;
-    } else if (std::regex_search(pos, str.end(), m, strRegEx,
-                                 std::regex_constants::match_continuous)) {
-      kind = Token::STR;
-    } else if (std::regex_search(pos, str.end(), m, codeRegEx,
-                                 std::regex_constants::match_continuous)) {
-      kind = Token::CODE;
-    }
-    if (kind != Token::EMPTY) {
-      tok.str = std::string_view(m[1].first, m[1].second);
-      tok.kind = kind;
-      pos = m[0].second;
-      return tok;
-    }
-    error(std::format("Invalid token: {}", *pos));
-  }
-
-  Token::Kind getSingleCharKind() {
-    switch (*pos) {
-    case '{':
-      return Token::CURLYO;
-    case '}':
-      return Token::CURLYC;
-    case '(':
-      return Token::PARENO;
-    case ')':
-      return Token::PARENC;
-    case '[':
-      return Token::SQUAREO;
-    case ']':
-      return Token::SQUAREC;
-    case '=':
-      return Token::EQ;
-    case ':':
-      return Token::COLON;
-    case ',':
-      return Token::COMMA;
-    case ';':
-      return Token::SEMICOLON;
-    case '%':
-      return Token::PERCENT;
-    case '#':
-      return Token::HASH;
-    case '/':
-      return Token::SLASH_FWD;
-    case '.':
-      return Token::DOT;
-    case '<':
-      return Token::LT;
-    case '>':
-      return Token::GT;
-    case '@':
-      return Token::AT;
-    case '!':
-      return Token::EXCLAM;
-    default:
-      return Token::EMPTY;
-    }
-  }
-
-  bool eatWhitespace() {
-    while (true) {
-      if (pos == str.end()) {
-        return false;
-      }
-      if (isspace(*pos)) {
-        ++pos;
-      } else {
-        return true;
-      }
-    }
-  }
-};
-
-class Lexer {
-public:
-  TokenSource &tokSrc;
-  Token tok;
-
-  Lexer(TokenSource &tokSrc) : tokSrc(tokSrc) { fetchToken(); }
-
-  void fetchToken() { tok = tokSrc.fetchToken(); }
-  Token peek() { return tok; }
-
-  Token::Kind peekKind() { return tok.kind; }
-
-  Token next() {
-    Token tmp = tok;
-    fetchToken();
-    return tmp;
-  }
-
-  bool match(Token::Kind kind) {
-    if (tok.kind != kind)
-      return false;
-
-    return true;
-  }
-
-  bool matchOrEmpty(Token::Kind kind) {
-    if (tok.kind == kind || tok.kind == Token::EMPTY) {
-      return true;
-    }
-    return false;
-  }
-
-  bool matchNext(Token::Kind kind) {
-    if (tok.kind != kind)
-      return false;
-
-    fetchToken();
-    return true;
-  }
-
-  bool matchOrEmptyNext(Token::Kind kind) {
-    if (tok.kind != kind && tok.kind != Token::EMPTY)
-      return false;
-
-    fetchToken();
-    return true;
-  }
-
-  Token expectNext(Token::Kind kind) {
-    if (tok.kind != kind)
-      error(std::string("Expected different token. Got: ")
-                .append(std::string_view(tok)));
-
-    return next();
-  }
-
-  void expectIdentNext(std::string_view ident) {
-    if (expectNext(Token::IDENT) != ident) {
-      error("Expected different ident");
-    }
-  }
-
-  bool matchIdent(std::string_view ident) {
-    if (tok.kind == Token::IDENT && tok == ident) {
-      return true;
-    }
-    return false;
-  }
-
-  bool matchIdentNext(std::string_view ident) {
-    if (tok.kind == Token::IDENT && tok == ident) {
-      fetchToken();
-      return true;
-    }
-    return false;
-  }
-
-  Token expectSSAName() {
-    expectNext(Token::PERCENT);
-    return expectNext(Token::IDENT);
-  }
-
-  Token expectPlaceholderName() {
-    expectNext(Token::HASH);
-    return expectNext(Token::IDENT);
-  }
-
-  void expectDoubleColon() {
-    expectNext(Token::COLON);
-    expectNext(Token::COLON);
-  }
-
-  RecordIdent expectRecordIdent() {
-    std::vector<std::string_view> res;
-    res.push_back(expectNext(Token::IDENT));
-    while (match(Token::COLON)) {
-      expectDoubleColon();
-      res.push_back(expectNext(Token::IDENT));
-    }
-    return res;
-  }
-
-  RecordHdr expectRecordHdr() {
-    RecordHdr res;
-    if (matchIdentNext("let")) {
-      res.name = expectNext(Token::IDENT);
-      expectNext(Token::EQ);
-    }
-    if (matchNext(Token::EXCLAM)) {
-      res.isTemplateInstance = true;
-    }
-    res.type = expectNext(Token::IDENT);
-    return res;
-  }
-
-  std::vector<Token> expectCode() {
-    std::vector<Token> code;
-    while (true) {
-      switch (peekKind()) {
-      default:
-        return code;
-      case Token::CODE:
-        code.push_back(next());
-        break;
-      case Token::HASH:
-      case Token::PERCENT:
-      case Token::IDENT:
-        code.push_back(next());
-        break;
-      }
-    }
-  }
-};
-
-class RecordSpace;
-
-class Record {
-public:
-  virtual ~Record() {}
-
-  virtual void parse(Lexer &lex) {}
-
-  std::string_view name;
-  std::string_view type;
-  RecordSpace *parent = nullptr;
-};
-
-class TokenRecord : public Record {
-public:
-  TokenRecord() { type = "token"; }
-
-  void parse(Lexer &lex) override {
-    unsigned braces = 1;
-    while (true) {
-      switch (lex.peekKind()) {
-      case Token::CURLYO:
-        ++braces;
-        break;
-      case Token::CURLYC:
-        --braces;
-        break;
-      case Token::EMPTY:
-        error("Token empty in TokenRecord");
-        break;
-      default:
-        break;
-      }
-      if (braces == 0) {
-        break;
-      } else {
-        toks.emplace_back(lex.next());
-      }
-    }
-  }
-  std::vector<Token> toks;
-  std::string_view realType;
-};
-
-class RecordFactory {
-public:
-  using factory_func = std::function<std::unique_ptr<Record>()>;
-
-  RecordFactory() {}
-
-  RecordFactory(
-      std::initializer_list<std::pair<const char *, factory_func>> init) {
-    for (auto &i : init) {
-      registerRecord(i.first, i.second);
-    }
-  }
-
-  std::unique_ptr<Record> createRecord(std::string_view type) {
-    auto it = recTemplates.find(type);
-    if (it == recTemplates.end()) {
-      return nullptr;
-    }
-    auto rec = it->second();
-    rec->type = type;
-    return rec;
-  }
-
-  void registerRecord(const char *type, factory_func func) {
-    recTemplates.try_emplace(std::string_view(type), func);
-  }
-
-private:
-  std::unordered_map<std::string_view, factory_func> recTemplates;
-};
-
-class RecordSpace : public Record {
-public:
-  RecordSpace(RecordFactory &fac) : fac(fac) {}
-  void parse(Lexer &lex) override;
-
-  Record *getRecord(std::string_view recName) {
-    auto it = recordIndex.find(recName);
-    if (it == recordIndex.end()) {
-      return nullptr;
-    }
-    return records[it->second].get();
-  }
-
-  void addRecord(std::unique_ptr<Record> recPtr) {
-    assert(recPtr);
-    Record *rec = recPtr.get();
-    records.emplace_back(std::move(recPtr));
-    rec->parent = this;
-    if (rec->name.empty() || rec->name == "_") {
-      return;
-    }
-    auto [_, succ] = recordIndex.try_emplace(rec->name, records.size() - 1);
-    if (!succ) {
-      error("Redeclared record");
-    }
-  }
-
-  template <typename T>
-  void gather(std::vector<T *> &out, std::string_view type) {
-    for (auto &rec : records) {
-      if (rec->type == type) {
-        out.push_back(dynamic_cast<T *>(rec.get()));
-      }
-    }
-  }
-
-  template <typename T>
-  void gatherRecursively(std::vector<T *> &out, std::string_view type) {
-    gather(out, type);
-    for (auto &rec : records) {
-      if (auto *rs = dynamic_cast<RecordSpace *>(rec.get())) {
-        rs->gatherRecursively(out, type);
-      }
-    }
-  }
-
-  RecordFactory &fac;
-  std::vector<std::unique_ptr<Record>> records;
-  std::unordered_map<std::string_view, size_t> recordIndex;
-};
-
-class SymbolTable {
-public:
-  Record *getRecord(std::string_view name) {
-    for (auto &rs : scopes) {
-      auto *rec = rs->getRecord(name);
-      if (rec) {
-        return rec;
-      }
-    }
-    return nullptr;
-  }
-
-  Record *lookupPath(const RecordIdent &recIdent) {
-    if (recIdent.idents.size() < 1) {
-      return nullptr;
-    }
-    Record *rec = getRecord(recIdent.idents[0]);
-    for (int i = 1; i < recIdent.idents.size(); ++i) {
-      RecordSpace *rs = dynamic_cast<RecordSpace *>(rec);
-      if (!rs) {
-        return nullptr;
-      }
-      rec = rs->getRecord(recIdent.idents[i]);
-    }
-    return rec;
-  }
-
-  void pushScope(RecordSpace &rs) { scopes.push_back(&rs); }
-
-  void popScope() { scopes.pop_back(); }
-
-  std::vector<RecordSpace *> scopes;
-};
-
-class DSLListRecord : public Record {
-public:
-  void parse(Lexer &lex) override {
-    while (lex.match(Token::IDENT)) {
-      refs.emplace_back(lex.expectRecordIdent());
-    }
-  }
-
-  std::vector<Record *> genRecs(SymbolTable &sym) {
-    std::vector<Record *> res;
-    for (auto &ref : refs) {
-      auto *rec = sym.lookupPath(ref);
-      if (!rec) {
-        error("dsl_list: record not found");
-      }
-      res.push_back(rec);
-    }
-    return res;
-  }
-
-  std::vector<RecordIdent> refs;
-};
-
-class UsingRecord : public DSLListRecord {
-public:
-  void pushSymbols(SymbolTable &sym) {
-    auto refs = genRecs(sym);
-    for (auto *ref : refs) {
-      RecordSpace *rs = dynamic_cast<RecordSpace *>(ref);
-      if (!rs) {
-        error("Reference in using record isn't RecordSpace");
-      }
-      sym.pushScope(*rs);
-    }
-  }
-  void popSymbols(SymbolTable &sym) {
-    for (int i = 0; i < refs.size(); ++i) {
-      sym.popScope();
-    }
-  }
-};
-
-class BoolRecord : public Record {
-public:
-  void parse(Lexer &lex) override {
-    std::string_view tok = lex.expectNext(Token::IDENT);
-    if (tok == "true") {
-      val = true;
-    } else if (tok == "false") {
-      val = false;
-    } else {
-      error("Invalid bool value");
-    }
-  }
-
-  bool val;
-
-  const char *gen() { return val ? "true" : "false"; }
-};
-
-class TemplateRecord : public RecordSpace {
-public:
-  static RecordFactory facImpl;
-  TemplateRecord() : RecordSpace(facImpl) {}
-  class VarRecord : public Record {};
-  void parse(Lexer &lex) override {
-    while (!lex.matchOrEmpty(Token::CURLYC)) {
-      RecordHdr hdr = lex.expectRecordHdr();
-      lex.expectNext(Token::CURLYO);
-      if (hdr.isTemplateInstance) {
-        error("Template instantiation not allowed in Template");
-      }
-      auto recPtr = std::make_unique<TokenRecord>();
-      recPtr->name = hdr.name;
-      recPtr->realType = hdr.type;
-      recPtr->parse(lex);
-      lex.expectNext(Token::CURLYC);
-      addRecord(std::move(recPtr));
-    }
-  }
-};
-
-RecordFactory TemplateRecord::facImpl{
-    {"template_var",
-     []() { return std::make_unique<TemplateRecord::VarRecord>(); }},
-};
-
-class InstanceRecord : public RecordSpace {
-public:
-  InstanceRecord(RecordFactory &fac) : RecordSpace(fac) { type = "Instance"; }
-
-  void materialize(TemplateRecord &tempRec);
-
-  std::string_view templateName;
-};
-
-void RecordSpace::parse(Lexer &lex) {
-  while (!lex.matchOrEmpty(Token::CURLYC)) {
-    RecordHdr hdr = lex.expectRecordHdr();
-    lex.expectNext(Token::CURLYO);
-    std::unique_ptr<Record> recPtr;
-    if (hdr.isTemplateInstance) {
-      auto instRecPtr = std::make_unique<InstanceRecord>(fac);
-      instRecPtr->templateName = hdr.type;
-      recPtr = std::move(instRecPtr);
-    } else {
-      recPtr = fac.createRecord(hdr.type);
-      if (!recPtr) {
-        error(std::format("Invalid record type: {}", hdr.type));
-      }
-    }
-    recPtr->name = hdr.name;
-    recPtr->parse(lex);
-    lex.expectNext(Token::CURLYC);
-    addRecord(std::move(recPtr));
-  }
-}
-
-class TemplatedTokenSource : public TokenSource {
-public:
-  InstanceRecord &instanceRec;
-  TokenRecord &tokRec;
-  size_t pos = 0;
-  size_t subPos;
-  TokenRecord *subTokRec = nullptr;
-
-  TemplatedTokenSource(InstanceRecord &instanceRec, TokenRecord &tokRec)
-      : instanceRec(instanceRec), tokRec(tokRec) {}
-
-  Token fetchToken() override {
-    if (subTokRec) {
-      if (subPos < subTokRec->toks.size()) {
-        return subTokRec->toks[subPos++];
-      }
-      subTokRec = nullptr;
-    }
-    if (pos >= tokRec.toks.size()) {
-      return Token();
-    }
-    Token &tok = tokRec.toks[pos++];
-    if (tok.kind == Token::IDENT) {
-      subTokRec = dynamic_cast<TokenRecord *>(instanceRec.getRecord(tok.str));
-      if (subTokRec && subTokRec->toks.size() > 0) {
-        subPos = 0;
-        return subTokRec->toks[subPos++];
-      }
-      subTokRec = nullptr;
-    }
-    return tok;
-  }
-};
-
-void InstanceRecord::materialize(TemplateRecord &tempRec) {
-  for (auto &recPtr : tempRec.records) {
-    auto *tokRec = dynamic_cast<TokenRecord *>(recPtr.get());
-    if (!tokRec)
-      continue;
-    TemplatedTokenSource tokSrc(*this, *tokRec);
-    Lexer lex(tokSrc);
-    auto rec = fac.createRecord(tokRec->realType);
-    rec->parse(lex);
-    addRecord(std::move(rec));
-  }
-}
-
-class CodeBuilder {
-public:
-  CodeBuilder &startFunction(std::string_view signature) {
-    header << signature << ";\n";
-    indent().print(signature).print(" {\n");
-    incIndent();
-    return *this;
-  }
-
-  CodeBuilder &startBlock(std::string_view hdr) {
-    if (hdr.empty()) {
-      println("{");
-    } else {
-      indent().print(hdr).print(" {\n");
-    }
-    incIndent();
-    return *this;
-  }
-
-  CodeBuilder &endBlock() {
-    decIndent();
-    println("}");
-    return *this;
-  }
-
-  CodeBuilder &endBlockSemicolon() {
-    decIndent();
-    println("};");
-    return *this;
-  }
-
-  CodeBuilder &incIndent() {
-    ++indentationLevel;
-    return *this;
-  }
-
-  CodeBuilder &decIndent() {
-    --indentationLevel;
-    return *this;
-  }
-
-  CodeBuilder &print(std::string_view txt) {
-    body << txt;
-    return *this;
-  }
-
-  CodeBuilder &println(std::string_view txt = std::string_view()) {
-    if (!txt.empty()) {
-      indent();
-    }
-    body << txt << "\n";
-    return *this;
-  }
-
-  CodeBuilder &indent() {
-    for (int i = 0; i < indentationLevel; ++i) {
-      body << "  ";
-    }
-    return *this;
-  }
-
-  std::ostringstream header;
-  std::ostringstream body;
-  int indentationLevel = 0;
-};
-
-class IncludeRecord : public RecordSpace {
-public:
-  IncludeRecord(RecordFactory &fac) : RecordSpace(fac) {}
-
-  void parse(Lexer &lex) override {
-    childContent =
-        loadFile(includeDir + '/' +
-                 std::string(std::string_view(lex.expectNext(Token::STR))));
-    StringTokenSource tokSrc(childContent);
-    Lexer childLex(tokSrc);
-    RecordSpace::parse(childLex);
-  }
-
-  std::string childContent;
-};
-
-class IRPatternRecord : public Record {
-
-public:
-  IRPatternRecord() {}
-
-  struct OperandPat {
-    enum Kind {
-      SSA_DEF,
-      SSA_USE,
-      RECIDENT_DEF,
-      RECIDENT_USE,
-      OP_PLACEHOLDER,
-      IMM32,
-      COND_EQ,
-      COND_NE,
-      COND_LT,
-      COND_LTU,
-      COND_LE,
-      COND_LEU,
-      COND_GT,
-      COND_GTU,
-      COND_GE,
-      COND_GEU,
-    };
-
-    static const char *kindName(Kind kind) {
-      switch (kind) {
-      case SSA_DEF:
-        return "def";
-      case SSA_USE:
-        return "%";
-      case OP_PLACEHOLDER:
-        return "#";
-      case COND_EQ:
-        return "eq";
-      case COND_NE:
-        return "ne";
-      case COND_LT:
-        return "lt";
-      case COND_LTU:
-        return "ltu";
-      case COND_LE:
-        return "le";
-      case COND_LEU:
-        return "leu";
-      case COND_GT:
-        return "gt";
-      case COND_GTU:
-        return "gtu";
-      case COND_GE:
-        return "ge";
-      case COND_GEU:
-        return "geu";
-      case IMM32:
-        return "imm32";
-      case RECIDENT_DEF:
-      case RECIDENT_USE:
-        break;
-      }
-      return nullptr;
-    }
-
-    Kind kind;
-    std::string_view name;
-    std::string_view type;
-    std::vector<Token> code;
-    std::string_view num;
-    RecordIdent recIdent;
-    bool isGenerated = false;
-  };
-
-  struct InstrPat {
-    RecordIdent opcode;
-    std::vector<OperandPat> operands;
-    bool isGenerated = false;
-
-    static InstrPat parse(Lexer &lex) {
-      InstrPat instr;
-      instr.opcode = lex.expectRecordIdent();
-      while (!lex.matchOrEmptyNext(Token::SEMICOLON)) {
-        instr.operands.emplace_back();
-        OperandPat &op = instr.operands.back();
-        if (lex.match(Token::PERCENT)) {
-          op.kind = OperandPat::SSA_USE;
-          op.name = lex.expectSSAName();
-        } else if (lex.match(Token::IDENT)) {
-          if (lex.matchIdentNext("def")) {
-            lex.expectNext(Token::PARENO);
-            if (lex.match(Token::PERCENT)) {
-              op.kind = OperandPat::SSA_DEF;
-              op.name = lex.expectSSAName();
-              lex.expectNext(Token::COMMA);
-              if (lex.match(Token::IDENT)) {
-                op.type = lex.expectNext(Token::IDENT);
-              } else {
-                op.code = lex.expectCode();
-              }
-            } else {
-              op.kind = OperandPat::RECIDENT_DEF;
-              op.recIdent = lex.expectRecordIdent();
-            }
-            lex.expectNext(Token::PARENC);
-          } else if (lex.matchIdentNext("eq")) {
-            op.kind = OperandPat::COND_EQ;
-          } else if (lex.matchIdentNext("ne")) {
-            op.kind = OperandPat::COND_NE;
-          } else if (lex.matchIdentNext("lt")) {
-            op.kind = OperandPat::COND_LT;
-          } else if (lex.matchIdentNext("ltu")) {
-            op.kind = OperandPat::COND_LTU;
-          } else if (lex.matchIdentNext("le")) {
-            op.kind = OperandPat::COND_LE;
-          } else if (lex.matchIdentNext("leu")) {
-            op.kind = OperandPat::COND_LEU;
-          } else if (lex.matchIdentNext("gt")) {
-            op.kind = OperandPat::COND_GT;
-          } else if (lex.matchIdentNext("gtu")) {
-            op.kind = OperandPat::COND_GTU;
-          } else if (lex.matchIdentNext("ge")) {
-            op.kind = OperandPat::COND_GE;
-          } else if (lex.matchIdentNext("geu")) {
-            op.kind = OperandPat::COND_GEU;
-          } else if (lex.matchIdentNext("imm32")) {
-            op.kind = OperandPat::IMM32;
-            lex.expectNext(Token::PARENO);
-            if (lex.match(Token::IDENT)) {
-              op.num = lex.expectNext(Token::IDENT);
-            } else {
-              op.code = lex.expectCode();
-            }
-            lex.expectNext(Token::PARENC);
-          } else {
-            op.kind = OperandPat::RECIDENT_USE;
-            op.recIdent = lex.expectRecordIdent();
-          }
-        } else if (lex.match(Token::HASH)) {
-          op.kind = OperandPat::OP_PLACEHOLDER;
-          op.name = lex.expectPlaceholderName();
-        } else {
-          op.kind = OperandPat::RECIDENT_USE;
-          op.recIdent = lex.expectRecordIdent();
-        }
-      }
-      return instr;
-    }
-
-    std::string genInstrKind(SymbolTable &sym) {
-      Record *rec = sym.lookupPath(opcode);
-      if (!rec || rec->type != "Instr" || rec->parent->type != "Arch") {
-        return std::format("Instr::{}", opcode.getName());
-      }
-      return std::format("{}::{}", rec->parent->name, opcode.getName());
-    }
-  };
-
-  struct InstrPats {
-    std::vector<InstrPat> instrs;
-    void parse(Lexer &lex) {
-      while (!lex.match(Token::CURLYC)) {
-        instrs.push_back(InstrPat::parse(lex));
-      }
-    }
-  };
-
-  struct IfPat {
-    void parse(Lexer &lex) { code = lex.expectCode(); }
-    std::vector<Token> code;
-  };
-
-  struct ApplyPat {
-    void parse(Lexer &lex) { code = lex.expectCode(); }
-    std::vector<Token> code;
-  };
-
-  std::string genType(std::string_view tyStr) {
-    if (tyStr == "ptr") {
-      return "PtrSSAType::get()";
-    }
-    static std::regex intRE("i([0-9]+)");
-    std::cmatch m;
-    if (std::regex_match(tyStr.begin(), tyStr.end(), m, intRE)) {
-      return std::format("IntSSAType::get({})", m[1].str());
-    }
-    error("Invalid ir type");
-    return std::string();
-  }
-
-  void genInstrMatch(InstrPat &instrPat, std::string_view instrVar,
-                     CodeBuilder &code, SymbolTable &sym) {
-    if (instrPat.isGenerated) {
-      return;
-    }
-
-    if (instrPat.opcode.idents.back() != "_") {
-      code.println(std::format("if({}.getKind() != {}) return false;", instrVar,
-                               instrPat.genInstrKind(sym)));
-    }
-    instrPat.isGenerated = true;
-    unsigned opNum = 0;
-    for (auto &op : instrPat.operands) {
-      switch (op.kind) {
-      case OperandPat::SSA_DEF:
-        if (op.name != "_") {
-          code.println(std::format("auto &m_def_{} = {}.getOperand({});",
-                                   op.name, instrVar, opNum));
-        }
-        if (op.type != "_") {
-          code.println(std::format(
-              "if({}.getOperand({}).ssaDefType() != {}) return false;",
-              instrVar, opNum, genType(op.type)));
-        }
-        break;
-      case OperandPat::SSA_USE: {
-        if (op.name == "_")
-          break;
-        auto it = matchSSADefs.find(op.name);
-        assert(it != matchSSADefs.end());
-        auto [usePat, useOpNum] = it->second;
-        if (usePat->operands[useOpNum].kind == OperandPat::SSA_USE) {
-          if (usePat == &instrPat) {
-            code.println(std::format(
-                "auto &m_def_{} = {}.getOperand({}).ssaUse().getDef();",
-                op.name, instrVar, opNum));
-          } else if (usePat->isGenerated) {
-            code.println(
-                std::format("if(&{}.getOperand({}).ssaUse().getDef() != "
-                            "&m_def_{}) return false;",
-                            instrVar, opNum, op.name));
-          } else {
-            error("Cannot match SSA use against ssa use in unconstrained "
-                  "instruction");
-          }
-        } else {
-          code.println(std::format("auto &m_def_{}_instr = "
-                                   "{}.getOperand({}).ssaUse().getDefInstr();",
-                                   op.name, instrVar, opNum));
-          genInstrMatch(*usePat, std::format("m_def_{}_instr", op.name), code,
-                        sym);
-        }
-        break;
-      }
-      case OperandPat::OP_PLACEHOLDER:
-        if (op.name == "_")
-          break;
-        code.println(std::format("auto &m_ph_{} = {}.getOperand({});", op.name,
-                                 instrVar, opNum));
-        break;
-      case OperandPat::COND_EQ:
-      case OperandPat::COND_NE:
-      case OperandPat::COND_LT:
-      case OperandPat::COND_LTU:
-      case OperandPat::COND_LE:
-      case OperandPat::COND_LEU:
-      case OperandPat::COND_GT:
-      case OperandPat::COND_GTU:
-      case OperandPat::COND_GE:
-      case OperandPat::COND_GEU:
-        code.println(std::format(
-            "if({}.getOperand({}).brCond() != BrCond::{}()) return false;",
-            instrVar, opNum, OperandPat::kindName(op.kind)));
-        break;
-      case OperandPat::IMM32:
-        code.println(
-            std::format("if({}.getOperand({}).imm32() != {}) return false;",
-                        instrVar, opNum, op.num));
-        break;
-      case OperandPat::RECIDENT_DEF:
-      case OperandPat::RECIDENT_USE:
-        error("Unsupported operand pattern in match");
-        break;
-      }
-      op.isGenerated = true;
-      ++opNum;
-    }
-  }
-
-  void genMatch(InstrPats &pats, CodeBuilder &code, SymbolTable &sym) {
-    collectMatchSSADefs(pats);
-    genInstrMatch(pats.instrs.back(), "m_root", code, sym);
-    for (auto &instr : pats.instrs) {
-      if (!instr.isGenerated) {
-        error("Ungenerated instruction pattern");
-      }
-      instr.isGenerated = false;
-    }
-  }
-
-  void genIf(IfPat &pat, CodeBuilder &code) {
-    code.indent();
-    code.print("if(!(");
-    code.print(genCode(pat.code));
-    code.print(")) return false;\n");
-  }
-
-  void genApply(ApplyPat &pat, CodeBuilder &code) {
-    code.indent();
-    code.print(genCode(pat.code));
-    code.print(";");
-  }
-
-  void genEmit(InstrPats &pats, CodeBuilder &code, SymbolTable &sym) {
-    unsigned instrNum = 0;
-    code.println("auto& e_insertpoint = m_root.getNextNode();");
-    for (auto &instr : pats.instrs) {
-      code.println(std::format("Instr *e_instr_{} = new Instr({});", instrNum,
-                               instr.genInstrKind(sym)));
-      code.println(
-          std::format("e_insertpoint.insertPrev(e_instr_{});", instrNum));
-      code.println(std::format("e_instr_{}->allocateOperands({});", instrNum,
-                               instr.operands.size()));
-      for (auto &op : instr.operands) {
-        switch (op.kind) {
-        case OperandPat::SSA_DEF: {
-          code.println(std::format(
-              "e_instr_{}->emplaceOperand<Operand::SSA_DEF_TYPE>({});",
-              instrNum,
-              op.code.size() > 0 ? genCode(op.code) : genType(op.type)));
-          if (op.name != "_") {
-            code.println(
-                std::format("auto &e_def_{} = e_instr_{}->getLastOperand();",
-                            op.name, instrNum));
-            auto it = matchSSADefs.find(op.name);
-            if (it != matchSSADefs.end()) {
-              code.println(
-                  std::format("m_def_{}.ssaDef().replaceAllUses(e_def_{});",
-                              op.name, op.name));
-              matchSSADefs.erase(it);
-            }
-          }
-          break;
-        }
-        case OperandPat::SSA_USE: {
-          auto it = matchSSADefs.find(op.name);
-          code.println(std::format(
-              "e_instr_{}->emplaceOperand<Operand::SSA_USE>({}_def_{});",
-              instrNum, it == matchSSADefs.end() ? "e" : "m", op.name));
-          break;
-        }
-        case OperandPat::OP_PLACEHOLDER: {
-          code.println(std::format(
-              "e_instr_{}->emplaceOperand<Operand::EMPTY>();", instrNum));
-          code.println(std::format("e_instr_{}->getLastOperand() = m_ph_{};",
-                                   instrNum, op.name));
-          break;
-        }
-        case OperandPat::IMM32: {
-          code.println(std::format(
-              "e_instr_{}->emplaceOperand<Operand::IMM32>({});", instrNum,
-              op.code.size() > 0 ? genCode(op.code) : op.num));
-          break;
-        }
-        case OperandPat::COND_EQ:
-        case OperandPat::COND_NE:
-        case OperandPat::COND_LT:
-        case OperandPat::COND_LTU:
-        case OperandPat::COND_LE:
-        case OperandPat::COND_LEU:
-        case OperandPat::COND_GT:
-        case OperandPat::COND_GTU:
-        case OperandPat::COND_GE:
-        case OperandPat::COND_GEU:
-        case OperandPat::RECIDENT_DEF:
-          error("Unsupported operand pattern in emit");
-          break;
-        case OperandPat::RECIDENT_USE: {
-          Record *rec = sym.lookupPath(op.recIdent);
-          if (!rec || rec->parent->type != "Arch" || rec->type != "Reg")
-            error("Invalid recIdent");
-          code.println(std::format(
-              "e_instr_{}->emplaceOperand<Operand::REG_USE>({}::{});", instrNum,
-              rec->parent->name, rec->name));
-          break;
-        }
-        }
-      }
-      ++instrNum;
-    }
-  }
-
-  std::string genCode(std::vector<Token> code) {
-    std::string res;
-    for (size_t i = 0; i < code.size(); ++i) {
-      auto &tok = code[i];
-      if (tok.kind == Token::CODE) {
-        res += std::string_view(tok);
-      } else if (tok.kind == Token::IDENT) {
-        if (i == 0) {
-          res += std::string_view(tok);
-        } else
-          switch (code[i - 1].kind) {
-          default:
-            res += std::string_view(tok);
-            break;
-          case Token::HASH:
-            res += std::format("m_ph_{}", tok.str);
-            break;
-          case Token::PERCENT:
-            res += std::format("m_def_{}", tok.str);
-            break;
-          }
-      }
-    }
-    return res;
-  }
-
-  void collectMatchSSADefs(InstrPats &m) {
-    for (auto &instr : m.instrs) {
-      unsigned opNum = 0;
-      for (auto &op : instr.operands) {
-        if ((op.kind == OperandPat::SSA_DEF ||
-             op.kind == OperandPat::SSA_USE) &&
-            op.name != "_") {
-          auto [_, succ] = matchSSADefs.try_emplace(op.name, &instr, opNum);
-          if (op.kind == OperandPat::SSA_DEF && !succ) {
-            error("SSA Def redeclared");
-          }
-        }
-        ++opNum;
-      }
-    }
-  }
-
-  void parse(Lexer &lex) override {
-    while (!lex.matchOrEmpty(Token::CURLYC)) {
-      std::string_view recType = lex.expectNext(Token::IDENT);
-      lex.expectNext(Token::CURLYO);
-      if (recType == "match") {
-        if (matchPats.instrs.size() != 0) {
-          error("Multiple match patterns in ir_pat");
-        }
-        matchPats.parse(lex);
-      } else if (recType == "emit") {
-        if (emitPats.instrs.size() != 0) {
-          error("Multiple emit patterns in ir_pat");
-        }
-        emitPats.parse(lex);
-      } else if (recType == "if") {
-        ifPats.emplace_back();
-        ifPats.back().parse(lex);
-      } else if (recType == "apply") {
-        applyPats.emplace_back();
-        applyPats.back().parse(lex);
-      } else {
-        error("Invalid operator in ir_pat");
-      }
-      lex.expectNext(Token::CURLYC);
-    }
-  }
-
-  void gen(CodeBuilder &code, SymbolTable &sym) {
-    genMatch(matchPats, code, sym);
-    if (matchPats.instrs.size() == 0) {
-      error("[ir_pat] missing match pattern");
-    }
-    for (auto &pat : ifPats) {
-      genIf(pat, code);
-    }
-    if (emitPats.instrs.size() > 0) {
-      code.println();
-      genEmit(emitPats, code, sym);
-    }
-    for (auto &pat : applyPats) {
-      genApply(pat, code);
-    }
-    code.println("return true;");
-  }
-
-  std::unordered_map<std::string_view, std::pair<InstrPat *, unsigned>>
-      matchSSADefs;
-
-  InstrPats matchPats;
-  InstrPats emitPats;
-  std::vector<IfPat> ifPats;
-  std::vector<ApplyPat> applyPats;
-};
+#include "CodeBuilder.h"
+#include "IRPatRecord.h"
+#include "Lexer.h"
+#include "Record.h"
 
 void genKindSwitch(std::string_view fnName, std::vector<RecordSpace *> &rs,
                    CodeBuilder &code) {
@@ -1232,7 +21,7 @@ void genKindSwitch(std::string_view fnName, std::vector<RecordSpace *> &rs,
   code.endBlock();
 }
 
-void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
+void genArch(RecordSpace &rs, CodeBuilder &code) {
   std::vector<RecordSpace *> regRecs;
   std::vector<RecordSpace *> regClassRecs;
   std::vector<RecordSpace *> instrRecs;
@@ -1250,9 +39,9 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   code.startBlock("inline const ArchReg archRegs[] =");
   for (auto rec : regRecs) {
     auto *noLiveness = dynamic_cast<BoolRecord *>(rec->getRecord("noLiveness"));
-    code.println(std::format("{{ .name = \"{}\", .noLiveness = {}}},",
-                             rec->name,
-                             noLiveness ? noLiveness->gen() : "false"));
+    code.println(std::format(
+        "{{ .reg = {}, .name = \"{}\", .noLiveness = {}}},", rec->name,
+        rec->name, noLiveness ? noLiveness->gen() : "false"));
   }
   code.endBlockSemicolon();
   code.startFunction("constexpr const ArchReg* getArchReg(unsigned kind)");
@@ -1270,25 +59,51 @@ void genArch(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   code.endBlockSemicolon();
   code.startBlock("inline const ArchInstr archInstrs[] =");
   for (auto rec : instrRecs) {
-    code.println(std::format("{{ .name = \"{}\"}},", rec->name));
+    code.println(
+        std::format("{{.kind = {}, .name = \"{}\"}},", rec->name, rec->name));
   }
   code.endBlockSemicolon();
   code.startFunction("constexpr const ArchInstr* getArchInstr(unsigned kind)");
   code.println(
       "return kind > ARCH_INSTR_START && kind < ARCH_INSTR_END ? archInstrs "
       "+ (kind - ARCH_INSTR_START - 1)"
-      ": nullptr;");
+      " : nullptr;");
   code.endBlock();
 
   code.startBlock("enum ArchRegClassKind");
+  code.println("ARCH_REGCLASS_START,");
   for (auto rec : regClassRecs) {
     code.println(std::format("{},", rec->name));
   }
+  code.println("ARCH_REGCLASS_END");
   code.endBlockSemicolon();
-  genKindSwitch("regClassKindName", regClassRecs, code);
+  for (auto rec : regClassRecs) {
+    code.startBlock(std::format("inline const ArchReg *archRegClass{}Regs[] = ",
+                                rec->name));
+    auto regsRec = rec->getRecord("regs");
+    if (!regsRec || regsRec->type != "dsl_list")
+      error("RegClass missing regs property");
+    for (auto regRec : dynamic_cast<DSLListRecord &>(*regsRec).genRecs()) {
+      code.println(std::format("getArchReg({}),", regRec->name));
+    }
+    code.endBlockSemicolon();
+  }
+  code.startBlock("inline const ArchRegClass archRegClasses[] =");
+  for (auto rec : regClassRecs) {
+    code.println(
+        std::format("{{.kind = {}, .name = \"{}\"}},", rec->name, rec->name));
+  }
+  code.endBlockSemicolon();
+  code.startFunction(
+      "constexpr const ArchRegClass* getArchRegClass(unsigned kind)");
+  code.println("return kind > ARCH_REGCLASS_START && kind < ARCH_REGCLASS_END "
+               "? archRegClasses "
+               "+ (kind - ARCH_REGCLASS_START - 1)"
+               " : nullptr;");
+  code.endBlock();
 }
 
-void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
+void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code) {
   std::vector<IRPatternRecord *> recs;
   rs.gatherRecursively(recs, "ir_pat");
   std::stable_sort(
@@ -1312,7 +127,7 @@ void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
     }
     code.startFunction(
         std::format("bool dslPat{}{}(Instr &m_root)", opcName, numSameOpc));
-    rec->gen(code, sym);
+    rec->gen(code);
     code.endBlock();
   }
   numSameOpc = 0;
@@ -1326,8 +141,9 @@ void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
       ++numSameOpc;
     } else {
       code.println("break;");
-      code.println(std::format("case {}: ",
-                               rec->matchPats.instrs.back().genInstrKind(sym)));
+      code.println(
+          std::format("case {}: ",
+                      rec->matchPats.instrs.back().genInstrKind(*rec->parent)));
       numSameOpc = 0;
       lastOpc = opcName;
     }
@@ -1340,28 +156,13 @@ void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code, SymbolTable &sym) {
   code.endBlock();
 }
 
-void materializeTemplates(RecordSpace &rs, SymbolTable &sym) {
-  for (auto &recPtr : rs.records) {
-    if (auto *rec = dynamic_cast<InstanceRecord *>(recPtr.get())) {
-      auto *tempRec =
-          dynamic_cast<TemplateRecord *>(sym.getRecord(rec->templateName));
-      if (!tempRec) {
-        error("Cannot materialize undefined template");
-      }
-      rec->materialize(*tempRec);
-    } else if (auto *rec = dynamic_cast<RecordSpace *>(recPtr.get())) {
-      materializeTemplates(*rec, sym);
-    }
-  }
-}
-
 int main(int argc, char *argv[]) {
   if (argc != 5) {
     std::cerr << "Expected <in-file> <out-file> <record> <include-dir>"
               << std::endl;
     return EXIT_FAILURE;
   }
-  includeDir = argv[4];
+  std::string includeDir = argv[4];
 
   RecordFactory fac;
   fac.registerRecord("ir_pat",
@@ -1378,9 +179,11 @@ int main(int argc, char *argv[]) {
                      [&]() { return std::make_unique<RecordSpace>(fac); });
   fac.registerRecord("RegClass",
                      [&]() { return std::make_unique<RecordSpace>(fac); });
-  fac.registerRecord("include",
-                     [&] { return std::make_unique<IncludeRecord>(fac); });
-  fac.registerRecord("using", [&] { return std::make_unique<UsingRecord>(); });
+  fac.registerRecord("include", [&] {
+    return std::make_unique<IncludeRecord>(fac, includeDir);
+  });
+  fac.registerRecord("using",
+                     [&] { return std::make_unique<DSLListRecord>(); });
   fac.registerRecord("Template",
                      [&] { return std::make_unique<TemplateRecord>(); });
   fac.registerRecord("token", [] {
@@ -1392,15 +195,11 @@ int main(int argc, char *argv[]) {
                      [&] { return std::make_unique<RecordSpace>(fac); });
   fac.registerRecord("bool", [] { return std::make_unique<BoolRecord>(); });
 
-  std::string str = loadFile(argv[1]);
-  StringTokenSource tokSrc(str);
-  Lexer lex(tokSrc);
-  RecordSpace rs(fac);
+  IncludeRecord rs(fac, includeDir);
+  rs.content = loadFile(argv[1]);
+  rs.parseContent();
 
-  rs.parse(lex);
-  SymbolTable sym;
   CodeBuilder code;
-  sym.pushScope(rs);
 
   std::string_view genRecName = argv[3];
   auto *genRec = rs.getRecord(genRecName);
@@ -1408,19 +207,12 @@ int main(int argc, char *argv[]) {
     error("Can't find this record");
   }
 
-  std::vector<UsingRecord *> usingRecs;
-  rs.gather(usingRecs, "using");
-
-  for (auto *rec : usingRecs) {
-    rec->pushSymbols(sym);
-  }
-
-  materializeTemplates(rs, sym);
+  rs.materializeTemplates();
 
   if (genRec->type == "Arch") {
-    genArch(dynamic_cast<RecordSpace &>(*genRec), code, sym);
+    genArch(dynamic_cast<RecordSpace &>(*genRec), code);
   } else if (genRec->type == "IRPatExecutor") {
-    genIRPatExecutor(dynamic_cast<RecordSpace &>(*genRec), code, sym);
+    genIRPatExecutor(dynamic_cast<RecordSpace &>(*genRec), code);
   } else {
     error("Can't generate this record type");
   }

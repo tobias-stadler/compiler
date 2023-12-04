@@ -38,6 +38,7 @@ public:
   void printNumberedDef(Operand &op);
   void printSSAType(SSAType &type);
   void printReg(Reg reg);
+  void printRegClass(unsigned kind);
 
   NumberingIRVisitor &getNumbering() { return numbering; }
 
