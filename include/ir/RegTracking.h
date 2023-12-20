@@ -14,6 +14,7 @@ class RegTracking {
   friend class PrintRegTrackingPass;
 
 public:
+  using iterator = Reg;
   static const IRInfoID ID;
 
   Reg trackSSADef(Operand &def) {
@@ -35,9 +36,30 @@ public:
     return it->second;
   }
 
+  Reg getRegForOperand(Operand &op) {
+    if (op.isReg()) {
+      return op.reg();
+    }
+    if (op.isSSARegDef()) {
+      return getRegForSSADef(op);
+    }
+    if (op.isSSARegUse()) {
+      return getRegForSSADef(op.ssaUse().getDef());
+    }
+    return {};
+  }
+
+  Operand *getTrackedSSADef(Reg reg) {
+    if (!isVReg(reg)) {
+      return nullptr;
+    }
+    auto &regInfo = getVRegInfo(reg);
+    return regInfo.kind == TRACKED_SSA_DEF ? regInfo.contentSSADef : nullptr;
+  }
+
   void lowerSSADef(Reg reg) {
     auto &regInfo = getVRegInfo(reg);
-    assert(regInfo.kind == TRACKING_SSA_DEF);
+    assert(regInfo.kind == TRACKED_SSA_DEF);
     auto &def = *regInfo.contentSSADef;
     switch (def.getKind()) {
     case Operand::SSA_DEF_TYPE:
@@ -67,16 +89,19 @@ public:
     return reg >= firstVReg && (reg - firstVReg) < vRegs.size();
   }
 
+  iterator begin() { return firstVReg; }
+
+  iterator end() { return nextVReg; }
+
 private:
   enum VRegKind {
-    TRACKING_SSA_DEF,
+    TRACKED_SSA_DEF,
     REGCLASS,
     TYPE,
   };
   struct VRegInfo {
     VRegInfo(SSAType &type) : kind(TYPE), contentType(&type) {}
-    VRegInfo(Operand &ssaDef)
-        : kind(TRACKING_SSA_DEF), contentSSADef(&ssaDef) {}
+    VRegInfo(Operand &ssaDef) : kind(TRACKED_SSA_DEF), contentSSADef(&ssaDef) {}
 
     VRegKind kind;
     union {
@@ -124,7 +149,7 @@ class RegTrackingPass : public IRPass<Function>,
 };
 
 class PrintRegTrackingPass : public IRPass<Function> {
-  const char *name() override { return "RegTrackingPass"; }
+  const char *name() override { return "PrintRegTrackingPass"; }
 
   void run(Function &func, IRInfo<Function> &info) override {
     auto &printer = info.query<PrintIRVisitor>();
@@ -135,7 +160,7 @@ class PrintRegTrackingPass : public IRPass<Function> {
       auto &reg = regTrack.vRegs[i];
       std::cout << (i + regTrack.firstVReg) << ": ";
       switch (reg.kind) {
-      case RegTracking::TRACKING_SSA_DEF:
+      case RegTracking::TRACKED_SSA_DEF:
         printer.printNumberedDef(*reg.contentSSADef);
         break;
       case RegTracking::REGCLASS:

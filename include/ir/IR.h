@@ -89,6 +89,8 @@ public:
   friend class std::hash<Reg>;
   using num_t = unsigned;
 
+  constexpr Reg() : num(0) {}
+
   constexpr Reg(num_t num) : num(num) {}
 
   constexpr friend bool operator==(Reg a, Reg b) { return a.num == b.num; }
@@ -369,11 +371,14 @@ public:
     case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
-    case SSA_USE:
       assert(false && "Cannot copy SSA operand");
       break;
+    case SSA_USE:
+      emplaceRaw<SSA_USE>();
+      o.ssaUse().getDef().ssaDefAddUse(*this);
+      break;
     case REG_DEF:
-      emplaceRaw<REG_DEF>(o.contentReg);
+      assert(false && "Cannot copy reg def");
       break;
     case REG_USE:
       emplaceRaw<REG_USE>(o.contentReg);
@@ -436,9 +441,7 @@ public:
       new (&contentDef) SSADef(std::forward<ARGS>(args)...);
     } else if constexpr (K == SSA_USE) {
       new (&contentUse) SSAUse(std::forward<ARGS>(args)...);
-    } else if constexpr (K == REG_DEF) {
-      new (&contentReg) Reg(std::forward<ARGS>(args)...);
-    } else if constexpr (K == REG_USE) {
+    } else if constexpr (K == REG_DEF || K == REG_USE) {
       new (&contentReg) Reg(std::forward<ARGS>(args)...);
     } else if constexpr (K == IMM32) {
       new (&contentImm32) int32_t(std::forward<ARGS>(args)...);
@@ -620,6 +623,10 @@ public:
   }
 
   Operand &getDef() { return funcDef; }
+
+  std::string name;
+  std::vector<SSAType *> argumentTypes;
+  std::vector<SSAType *> returnTypes;
 
 private:
   Operand funcDef;
@@ -857,6 +864,11 @@ public:
     } else {
       ++numOther;
     }
+  }
+
+  void addOperand(Operand &op) {
+    emplaceOperand<Operand::EMPTY>();
+    getLastOperand() = op;
   }
 
   bool isPhi() { return kind == PHI; }

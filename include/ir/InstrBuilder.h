@@ -183,6 +183,24 @@ public:
     }
   }
 
+  Instr &emitCall(Function &func, std::initializer_list<Operand *> args) {
+    assert(args.size() == func.argumentTypes.size() &&
+           "Invalid number of arrguments");
+    Instr *i = new Instr(Instr::CALL);
+    i->allocateOperands(func.returnTypes.size() + args.size());
+    for (auto *ty : func.returnTypes) {
+      assert(ty);
+      i->emplaceOperand<Operand::SSA_DEF_TYPE>(*ty);
+    }
+    unsigned argNum = 0;
+    for (auto *arg : args) {
+      assert(arg && arg->ssaDefType() == *func.argumentTypes[argNum]);
+      i->emplaceOperand<Operand::SSA_USE>(*arg);
+    }
+    emit(i);
+    return *i;
+  }
+
   Instr &emitReturn(Operand &val) {
     Instr *i = new Instr(Instr::RET);
     i->allocateOperands(1);

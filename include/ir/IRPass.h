@@ -4,6 +4,7 @@
 #include "ir/IR.h"
 #include <cassert>
 #include <cstdlib>
+#include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -51,13 +52,16 @@ public:
 
   template <typename T> void publish(T &val) {
     publisher[&T::ID] = {ctx.pass, &val};
+    preserve<T>();
   }
 
   template <typename T> T &query() {
     auto it = publisher.find(&T::ID);
     void *dataPtr = nullptr;
     if (it == publisher.end()) {
-      run(getAdvertisingPass(&T::ID), *ctx.obj);
+      auto &pass = getAdvertisingPass(&T::ID);
+      std::cout << "!!Running pass in query: " << pass.name() << "!!\n";
+      run(pass, *ctx.obj);
       auto it2 = publisher.find(&T::ID);
       assert(it2 != publisher.end() &&
              "Advertised pass did not publish promised data.");
@@ -88,17 +92,16 @@ private:
   };
 
   void run(IRPass<PassT> &pass, PassT &obj) {
-    PassContext oldCtx = ctx;
+    PassContext oldCtx = std::move(ctx);
     ctx = PassContext(&pass, &obj);
     pass.run(obj, *this);
     invalidate();
-    ctx = oldCtx;
+    ctx = std::move(oldCtx);
   }
 
   void invalidate() {
     assert(ctx.retracted.empty());
     if (ctx.preserveAll) {
-      assert(ctx.preserved.empty());
       return;
     }
     std::unordered_set<IRPass<PassT> *> passesToInvalidate;
@@ -150,6 +153,7 @@ public:
   void run(PassT &passObj) {
     info.reset();
     for (auto &pass : sequencedPasses) {
+      std::cout << "!!Running pass: " << pass->name() << "!!\n";
       info.run(*pass, passObj);
     }
   }
@@ -158,4 +162,18 @@ private:
   IRInfo<PassT> info;
   std::vector<std::unique_ptr<IRPass<PassT>>> sequencedPasses;
   std::vector<std::unique_ptr<IRPass<PassT>>> lazyPasses;
+};
+
+class FunctionPipelinePass : public IRPass<Program> {
+public:
+  FunctionPipelinePass(IRPipeline<Function> &pipeline) : pipeline(pipeline) {}
+  const char *name() override { return "FunctionPipelinePass"; }
+  void run(Program &prog, IRInfo<Program> &info) override {
+    for (auto &func : prog.functions) {
+      pipeline.run(*func);
+    }
+  }
+
+private:
+  IRPipeline<Function> &pipeline;
 };

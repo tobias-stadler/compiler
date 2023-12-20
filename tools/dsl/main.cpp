@@ -38,10 +38,13 @@ void genArch(RecordSpace &rs, CodeBuilder &code) {
   code.endBlockSemicolon();
   code.startBlock("inline const ArchReg archRegs[] =");
   for (auto rec : regRecs) {
-    auto *noLiveness = dynamic_cast<BoolRecord *>(rec->getRecord("noLiveness"));
+    auto *noLivenessRec =
+        dynamic_cast<BoolRecord *>(rec->getRecord("noLiveness"));
+    auto *aliasRec = dynamic_cast<TokenRecord *>(rec->getRecord("alias"));
     code.println(std::format(
-        "{{ .reg = {}, .name = \"{}\", .noLiveness = {}}},", rec->name,
-        rec->name, noLiveness ? noLiveness->gen() : "false"));
+        "{{ .reg = {}, .name = \"{}\", .noLiveness = {}, .alias = {}}},",
+        rec->name, rec->name, noLivenessRec ? noLivenessRec->gen() : "false",
+        aliasRec ? std::format("\"{}\"", aliasRec->toString()) : "nullptr"));
   }
   code.endBlockSemicolon();
   code.startFunction("constexpr const ArchReg* getArchReg(unsigned kind)");
@@ -59,8 +62,10 @@ void genArch(RecordSpace &rs, CodeBuilder &code) {
   code.endBlockSemicolon();
   code.startBlock("inline const ArchInstr archInstrs[] =");
   for (auto rec : instrRecs) {
-    code.println(
-        std::format("{{.kind = {}, .name = \"{}\"}},", rec->name, rec->name));
+    auto *aliasRec = dynamic_cast<TokenRecord *>(rec->getRecord("alias"));
+    code.println(std::format(
+        "{{.kind = {}, .name = \"{}\", .alias = {}}},", rec->name, rec->name,
+        aliasRec ? std::format("\"{}\"", aliasRec->toString()) : "nullptr"));
   }
   code.endBlockSemicolon();
   code.startFunction("constexpr const ArchInstr* getArchInstr(unsigned kind)");
@@ -90,8 +95,9 @@ void genArch(RecordSpace &rs, CodeBuilder &code) {
   }
   code.startBlock("inline const ArchRegClass archRegClasses[] =");
   for (auto rec : regClassRecs) {
-    code.println(
-        std::format("{{.kind = {}, .name = \"{}\"}},", rec->name, rec->name));
+    code.println(std::format("{{.kind = {}, .name = \"{}\", .regs = "
+                             "std::span(archRegClass{}Regs)}},",
+                             rec->name, rec->name, rec->name));
   }
   code.endBlockSemicolon();
   code.startFunction(

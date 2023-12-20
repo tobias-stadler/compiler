@@ -26,6 +26,13 @@ public:
 
   void parse(Lexer &lex) override;
 
+  std::string_view toString() {
+    if (toks.size() != 1) {
+      error("Expected string in token record");
+    }
+    return toks.back().str;
+  }
+
   std::vector<Token> toks;
   std::string_view realType;
 };

@@ -127,6 +127,7 @@ public:
     funcAST = &ast;
 
     ir.createAndSetFunction();
+    ir.getFunc().name = ast.decl.ident;
     storage.setFunction(ir.getFunc());
     ir.createAndSetBlock();
     SSABuilder::sealBlock(ir.getBlock());
