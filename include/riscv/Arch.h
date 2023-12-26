@@ -160,7 +160,6 @@ public:
     case Operand::EMPTY:
       break;
     case Operand::SSA_DEF_TYPE:
-    case Operand::SSA_DEF_REGCLASS:
     case Operand::SSA_DEF_BLOCK:
     case Operand::SSA_DEF_FUNCTION:
     case Operand::TYPE:

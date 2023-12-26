@@ -159,11 +159,7 @@ public:
     assert(val.isSSARegDef());
     Instr *i = new Instr(Instr::COPY);
     i->allocateOperands(2);
-    if (val.getKind() == Operand::SSA_DEF_TYPE) {
-      i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
-    } else {
-      i->emplaceOperand<Operand::SSA_DEF_REGCLASS>(val.ssaDefRegClass());
-    }
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
     i->emplaceOperand<Operand::SSA_USE>(val);
     emit(i);
     return *i;

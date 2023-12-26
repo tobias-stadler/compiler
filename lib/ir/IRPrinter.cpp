@@ -19,7 +19,6 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
       std::cout << "Empty";
       break;
     case Operand::SSA_DEF_TYPE:
-    case Operand::SSA_DEF_REGCLASS:
       std::cout << "unnamed def";
       break;
     case Operand::SSA_DEF_BLOCK:
@@ -112,11 +111,6 @@ void PrintIRVisitor::visitOperand(Operand &op) {
   case Operand::SSA_DEF_TYPE:
     std::cout << "def(%" << numbering.defNum(op) << ",";
     printSSAType(op.ssaDefType());
-    std::cout << ")";
-    break;
-  case Operand::SSA_DEF_REGCLASS:
-    std::cout << "def(%" << numbering.defNum(op) << ",";
-    printRegClass(op.ssaDefRegClass());
     std::cout << ")";
     break;
   case Operand::SSA_USE:

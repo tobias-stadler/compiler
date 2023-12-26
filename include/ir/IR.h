@@ -309,7 +309,6 @@ public:
   enum Kind {
     EMPTY,
     SSA_DEF_TYPE,
-    SSA_DEF_REGCLASS,
     SSA_DEF_BLOCK,
     SSA_DEF_FUNCTION,
     SSA_USE,
@@ -324,7 +323,6 @@ public:
   static constexpr bool kindIsSSADef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
-    case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
       return true;
@@ -333,13 +331,7 @@ public:
     }
   }
   static constexpr bool kindIsSSARegDef(Kind kind) {
-    switch (kind) {
-    case SSA_DEF_TYPE:
-    case SSA_DEF_REGCLASS:
-      return true;
-    default:
-      return false;
-    }
+    return kind == SSA_DEF_TYPE;
   }
   static constexpr bool kindIsSSAUse(Kind kind) { return kind == SSA_USE; }
   static constexpr bool kindIsReg(Kind kind) {
@@ -348,7 +340,6 @@ public:
   static constexpr bool kindIsDef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
-    case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
     case REG_DEF:
@@ -368,7 +359,6 @@ public:
     case EMPTY:
       break;
     case SSA_DEF_TYPE:
-    case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
       assert(false && "Cannot copy SSA operand");
@@ -417,7 +407,6 @@ public:
       contentReg.~Reg();
       break;
     case SSA_DEF_TYPE:
-    case SSA_DEF_REGCLASS:
     case SSA_DEF_BLOCK:
     case SSA_DEF_FUNCTION:
       contentDef.~SSADef();
@@ -483,10 +472,6 @@ public:
   void ssaDefSetType(SSAType &type) {
     assert(kind == SSA_DEF_TYPE);
     ssaDef().contentType = &type;
-  }
-  unsigned ssaDefRegClass() {
-    assert(kind == SSA_DEF_REGCLASS);
-    return ssaDef().contentRegClass;
   }
   Block &ssaDefBlock() {
     assert(kind == SSA_DEF_BLOCK);
@@ -586,7 +571,7 @@ public:
   }
 
   bool isImplicit() const { return flags.isImplicit; }
-  bool setImplicit(bool v) { flags.isImplicit = v; }
+  void setImplicit(bool v) { flags.isImplicit = v; }
 
 private:
   Kind kind = EMPTY;

@@ -77,10 +77,6 @@ IRPatternRecord::InstrPat IRPatternRecord::InstrPat::parse(Lexer &lex) {
 std::pair<std::string, std::string>
 IRPatternRecord::genType(RecordIdent &type) {
   Record *rec = parent->lookupIdent(type);
-  if (rec && rec->type == "RegClass" && rec->parent->type == "Arch") {
-    return {"SSA_DEF_REGCLASS",
-            std::format("{}::{}", rec->parent->name, rec->name)};
-  }
   if (type.idents.size() != 1) {
     error("Invalid type ident");
   }

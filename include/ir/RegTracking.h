@@ -66,10 +66,6 @@ public:
       regInfo.kind = TYPE;
       regInfo.contentType = &def.ssaDefType();
       break;
-    case Operand::SSA_DEF_REGCLASS:
-      regInfo.kind = REGCLASS;
-      regInfo.contentRegClass = def.ssaDefRegClass();
-      break;
     default:
       break;
     }
