@@ -585,8 +585,14 @@ public:
     return isSSAUse() && ssaUse().getDef().isSSARegDef();
   }
 
+  bool isImplicit() const { return flags.isImplicit; }
+  bool setImplicit(bool v) { flags.isImplicit = v; }
+
 private:
   Kind kind = EMPTY;
+  struct {
+    unsigned isImplicit : 1;
+  } flags;
   Instr *parent = nullptr;
   union {
     SSADef contentDef;

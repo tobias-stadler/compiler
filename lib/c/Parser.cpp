@@ -756,9 +756,20 @@ ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
   switch (tokKind) {
   case Token::PUNCT_PARENO: {
     lex->dropToken();
+    auto call = std::make_unique<FunctionCallAST>(std::move(base));
+    if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
+      do {
+        auto expr = parseExpression();
+        if (!expr) {
+          return error("Expected expresssion in function arguments");
+        }
+        call->args.push_back(expr.moveRes());
+      } while (lex->matchNextToken(Token::PUNCT_COMMA));
+    }
     if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
       return error("Expected closing paren for function call");
     }
+    res = std::move(call);
     break;
   }
   case Token::PUNCT_SQUAREO: {

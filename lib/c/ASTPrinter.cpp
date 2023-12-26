@@ -51,7 +51,12 @@ public:
   }
 
   void visitFunctionCall(FunctionCallAST &ast) {
-    std::cout << "FunctionCall()";
+    std::cout << "FunctionCall(";
+    dispatch(*ast.child);
+    for (auto &arg : ast.args) {
+      std::cout << ", ";
+      dispatch(*arg);
+    }
   }
 
   void visitCompoundSt(CompoundStAST &ast) {
@@ -133,6 +138,7 @@ public:
   void visitTranslationUnit(TranslationUnitAST &ast) {
     for (auto &d : ast.declarations) {
       dispatch(d.get());
+      std::cout << "\n";
     }
   }
 
@@ -216,13 +222,11 @@ public:
       printType(subType.get());
       std::cout << ";";
     }
+    std::cout << "\n";
     std::cout << "}";
   }
 };
 } // namespace
 
-void PrintAST(AST &ast) {
-  PrintASTVisitor().dispatch(ast);
-  std::cout << "\n";
-}
+void PrintAST(AST &ast) { PrintASTVisitor().dispatch(ast); }
 } // namespace c

@@ -249,7 +249,10 @@ public:
 
 class FunctionCallAST : public AST {
 public:
-  FunctionCallAST() : AST(FUNCTION_CALL) {}
+  FunctionCallAST(Ptr child) : AST(FUNCTION_CALL), child(std::move(child)) {}
+
+  std::vector<Ptr> args;
+  Ptr child;
 };
 
 class VarAST : public AST {
