@@ -113,6 +113,8 @@ public:
 
   CountedPtr<Type> &getType() { return type; }
 
+  Type::Kind getTypeKind() { return type->getKind(); }
+
   void fromSymbol(Symbol &sym) {
     category = LVALUE_SYMBOL;
     type = sym.getType();
@@ -124,7 +126,7 @@ public:
   }
 
   void deref() {
-    expectRValue();
+    expectRValueImplicitConv();
     expectTypeKindImplicitConv(Type::PTR);
     category = LVALUE_MEM;
     type = static_cast<PtrType *>(type.get())->getBaseType();
@@ -137,7 +139,7 @@ public:
   }
 
   void promoteInt() {
-    expectRValue();
+    expectRValueImplicitConv();
     expectTypeKindImplicitConv(intPromotion(type->getKind()));
   }
 
@@ -147,9 +149,16 @@ public:
   bool isLValue() {
     return category == LVALUE_SYMBOL || category == LVALUE_MEM;
   }
+
   bool isRValue() { return category == RVALUE; }
 
   void error(Result err) { handler->semanticError(err); }
+
+  void expectCategory(Category cat) {
+    if (category != cat) {
+      error(ERROR);
+    }
+  }
 
   void expectLValue() {
     if (!isLValue()) {
@@ -157,7 +166,7 @@ public:
     }
   }
 
-  void expectRValue() {
+  void expectRValueImplicitConv() {
     if (category == RVALUE) {
       return;
     }
@@ -203,6 +212,14 @@ public:
       return;
     }
     if (implicitConv(expectedKind)) {
+      return;
+    }
+    error(ERROR_EXPECT_TYPE);
+  }
+
+  void expectTypeKind(Type::Kind expectedKind) {
+    assert(type);
+    if (type->getKind() == expectedKind) {
       return;
     }
     error(ERROR_EXPECT_TYPE);

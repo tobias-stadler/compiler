@@ -217,4 +217,14 @@ let SH = Instr {
 let SW = Instr {
   let alias = token { "sw" }
 }
+
+let PSEUDO_CALL = Instr {
+  let alias = token { "call" }
+}
+let PSEUDO_LA = Instr {
+  let alias = token { "la" }
+}
+let PSEUDO_LI = Instr {
+  let alias = token { "li" }
+}
 }

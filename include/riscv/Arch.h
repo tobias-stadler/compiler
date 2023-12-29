@@ -28,6 +28,98 @@ public:
   }
 };
 
+class ABILoweringPass : public IRPass<Function> {
+  const char *name() override { return "RiscVABILoweringPass"; }
+
+  static constexpr auto inRegs =
+      std::to_array<Reg>({X10, X11, X12, X13, X14, X15, X16, X17});
+  static constexpr auto outRegs = std::to_array<Reg>({X10, X11});
+  static constexpr Reg raReg = X1;
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    if (func.empty()) {
+      return;
+    }
+    std::vector<Instr *> worklist;
+
+    auto &abiTy = IntSSAType::get(32);
+
+    auto &entryBB = func.getFirst();
+    InstrBuilder ir(entryBB.getFirstSentry());
+    size_t paramNum = 0;
+    for (auto it = entryBB.begin(), itEnd = entryBB.end(); it != itEnd;) {
+      auto &instr = *it;
+      ++it;
+      if (instr.getKind() != Instr::REF_PARAM) {
+        continue;
+      }
+      worklist.push_back(&instr);
+      if (paramNum < inRegs.size()) {
+        ir.emitCopy(abiTy, inRegs[paramNum]);
+        if (instr.getDef().ssaDefType() != abiTy) {
+          assert(false && "Unsupported parameter type");
+        }
+        instr.getDef().ssaDef().replaceAllUses(ir.getDef());
+      } else {
+        assert(false && "Stack passing unimplemented");
+      }
+      ++paramNum;
+    }
+    for (auto *instr : worklist) {
+      instr->deleteThis();
+    }
+    worklist.clear();
+
+    for (auto &block : func) {
+      for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
+        auto &instr = *it;
+        ++it;
+        InstrBuilder ir(instr);
+        if (instr.getKind() == Instr::RET) {
+          size_t paramNum = 0;
+          for (auto &op : instr) {
+            assert(op.ssaUse().getDef().ssaDefType() == abiTy);
+            assert(paramNum < outRegs.size());
+            ir.emitCopy(outRegs[paramNum], op.ssaUse().getDef());
+            ++paramNum;
+          }
+          Instr *i = func.createInstr(JALR, 3);
+          i->emplaceOperand<Operand::REG_DEF>(X0);
+          i->emplaceOperand<Operand::REG_USE>(raReg);
+          i->emplaceOperand<Operand::IMM32>(0);
+          ir.emit(i);
+          instr.deleteThis();
+        } else if (instr.getKind() == Instr::CALL) {
+          size_t paramNum = 0;
+          Operand &funcDef = instr.getOther().ssaUse().getDef();
+          for (auto it = instr.other_begin() + 1, itEnd = instr.other_end();
+               it != itEnd; ++it) {
+            auto &op = *it;
+            assert(op.ssaUse().getDef().ssaDefType() == abiTy);
+            assert(paramNum < inRegs.size());
+            ir.emitCopy(inRegs[paramNum], op.ssaUse().getDef());
+            ++paramNum;
+          }
+          Instr *i = func.createInstr(PSEUDO_CALL, 1);
+          i->emplaceOperand<Operand::SSA_USE>(funcDef);
+          ir.emit(i);
+          paramNum = 0;
+          for (auto it = instr.def_begin(), itEnd = instr.def_end();
+               it != itEnd; ++it) {
+            auto &op = *it;
+            assert(op.ssaDefType() == abiTy);
+            assert(paramNum < outRegs.size());
+            ir.emitCopy(abiTy, outRegs[paramNum]);
+            op.ssaDef().replaceAllUses(ir.getDef());
+            ++paramNum;
+          }
+          instr.deleteThis();
+        }
+      }
+    }
+  }
+};
+
 class InstrSelect : public IRPatExecutor {
   bool execute(Instr &instr) override;
 };
@@ -142,6 +234,8 @@ public:
     }
     bool first = true;
     for (auto &op : instr) {
+      if (op.isImplicit())
+        continue;
       if (first) {
         first = false;
       } else {
@@ -151,7 +245,7 @@ public:
     }
   }
 
-  void printFunctionLabel(Function &func) { out << func.name; }
+  void printFunctionLabel(Function &func) { out << func.getName(); }
 
   void printBlockLabel(Block &block) { out << ".Lbb" << blockToNum[&block]; }
 
@@ -161,7 +255,7 @@ public:
       break;
     case Operand::SSA_DEF_TYPE:
     case Operand::SSA_DEF_BLOCK:
-    case Operand::SSA_DEF_FUNCTION:
+    case Operand::SSA_DEF_GLOBAL:
     case Operand::TYPE:
     case Operand::BLOCK:
     case Operand::BRCOND:
@@ -169,11 +263,16 @@ public:
       assert(false && "Illegal operand");
       break;
     case Operand::SSA_USE: {
-      if (op.ssaUse().getDef().getKind() != Operand::SSA_DEF_BLOCK) {
-        assert(false && "Illegal operand");
-        return;
+      Operand &def = op.ssaUse().getDef();
+      if (def.getKind() == Operand::SSA_DEF_BLOCK) {
+        printBlockLabel(op.ssaUse().getDef().ssaDefBlock());
+        break;
       }
-      printBlockLabel(op.ssaUse().getDef().ssaDefBlock());
+      if (def.getKind() == Operand::SSA_DEF_GLOBAL) {
+        out << op.ssaDefGlobal().getName();
+        break;
+      }
+      assert(false && "Illegal operand");
       break;
     }
     case Operand::REG_DEF:

@@ -54,7 +54,7 @@ public:
     std::cout << "FunctionCall(";
     dispatch(*ast.child);
     for (auto &arg : ast.args) {
-      std::cout << ", ";
+      std::cout << ",";
       dispatch(*arg);
     }
   }
@@ -112,33 +112,72 @@ public:
   }
 
   void visitDeclaration(DeclarationAST &ast) {
+    printSymbolKind(ast.symbolKind);
+    std::cout << " ";
     bool first = true;
     for (auto &[d, initializer] : ast.declarators) {
-      if (!first) {
+      if (first) {
+        first = false;
+      } else {
         std::cout << ",\n";
       }
-      first = false;
       dispatch(d);
       if (initializer) {
         std::cout << " = ";
-        dispatch(initializer.get());
+        dispatch(*initializer);
       }
     }
   }
 
   void visitFunctionDefinition(FunctionDefinitionAST &ast) {
+    printSymbolKind(ast.symbolKind);
+    std::cout << " ";
     dispatch(ast.decl);
-    for (auto [name, idx] :
-         static_cast<FuncType *>(ast.decl.type.get())->getParamIndex()) {
-      std::cout << "\n" << name << ": " << idx;
-    }
     dispatch(ast.st.get());
   }
 
   void visitTranslationUnit(TranslationUnitAST &ast) {
     for (auto &d : ast.declarations) {
       dispatch(d.get());
-      std::cout << "\n";
+      std::cout << ";\n";
+    }
+  }
+
+  void printSymbolKind(Symbol::Kind symbolKind) {
+    switch (symbolKind) {
+    case Symbol::EMPTY:
+      std::cout << "default";
+      break;
+    case Symbol::TYPEDEF:
+      std::cout << "typedef";
+      break;
+    case Symbol::EXTERN:
+      std::cout << "extern";
+      break;
+    case Symbol::STATIC:
+      std::cout << "static";
+      break;
+    case Symbol::AUTO:
+      std::cout << "auto";
+      break;
+    case Symbol::REGISTER:
+      std::cout << "register";
+      break;
+    }
+  }
+
+  void printQualifier(const Type::Qualifier &quali) {
+    if (quali.isConst()) {
+      std::cout << " const";
+    }
+    if (quali.isRestrict()) {
+      std::cout << " restrict";
+    }
+    if (quali.isVolatile()) {
+      std::cout << " volatile";
+    }
+    if (quali.isAtomic()) {
+      std::cout << " atomic";
     }
   }
 
@@ -159,12 +198,13 @@ public:
       std::cout << "function(";
       bool first = true;
       FuncType *p = static_cast<FuncType *>(type);
-      for (auto &t : p->getParamTypes()) {
+      for (auto &[ident, t] : p->getParams()) {
         if (!first) {
           std::cout << ", ";
         }
         first = false;
         printType(t.get());
+        std::cout << " " << ident;
       }
       std::cout << ") returning ";
       printType(p->getBaseType().get());

@@ -2,11 +2,13 @@
 
 #include "support/IntrusiveList.h"
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <memory>
 #include <new>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -83,6 +85,7 @@ class Block;
 class Function;
 class Operand;
 class Program;
+class GlobalDef;
 
 class Reg {
 public:
@@ -216,11 +219,10 @@ class SSADef {
 public:
   SSADef(SSAType &type) : contentType(&type) {}
   SSADef(SSAType *type) : contentType(type) {}
-  SSADef(unsigned regClass) : contentRegClass(regClass) {}
   SSADef(Block &block) : contentBlock(&block) {}
   SSADef(Block *block) : contentBlock(block) {}
-  SSADef(Function &func) : contentFunction(&func) {}
-  SSADef(Function *func) : contentFunction(func) {}
+  SSADef(GlobalDef &global) : contentGlobal(&global) {}
+  SSADef(GlobalDef *global) : contentGlobal(global) {}
 
   SSADef(const SSADef &o) = delete;
   SSADef &operator=(const SSADef &o) = delete;
@@ -274,9 +276,8 @@ private:
   Operand *chNext = nullptr;
   union {
     SSAType *contentType;
-    unsigned contentRegClass;
     Block *contentBlock;
-    Function *contentFunction;
+    GlobalDef *contentGlobal;
   };
 };
 
@@ -310,7 +311,7 @@ public:
     EMPTY,
     SSA_DEF_TYPE,
     SSA_DEF_BLOCK,
-    SSA_DEF_FUNCTION,
+    SSA_DEF_GLOBAL,
     SSA_USE,
     REG_DEF,
     REG_USE,
@@ -324,7 +325,7 @@ public:
     switch (kind) {
     case SSA_DEF_TYPE:
     case SSA_DEF_BLOCK:
-    case SSA_DEF_FUNCTION:
+    case SSA_DEF_GLOBAL:
       return true;
     default:
       return false;
@@ -341,7 +342,7 @@ public:
     switch (kind) {
     case SSA_DEF_TYPE:
     case SSA_DEF_BLOCK:
-    case SSA_DEF_FUNCTION:
+    case SSA_DEF_GLOBAL:
     case REG_DEF:
       return true;
     default:
@@ -360,7 +361,7 @@ public:
       break;
     case SSA_DEF_TYPE:
     case SSA_DEF_BLOCK:
-    case SSA_DEF_FUNCTION:
+    case SSA_DEF_GLOBAL:
       assert(false && "Cannot copy SSA operand");
       break;
     case SSA_USE:
@@ -408,7 +409,7 @@ public:
       break;
     case SSA_DEF_TYPE:
     case SSA_DEF_BLOCK:
-    case SSA_DEF_FUNCTION:
+    case SSA_DEF_GLOBAL:
       contentDef.~SSADef();
       break;
     case SSA_USE:
@@ -465,21 +466,25 @@ public:
     assert(kindIsSSADef(kind));
     return contentDef;
   }
+
   SSAType &ssaDefType() {
     assert(kind == SSA_DEF_TYPE);
     return *ssaDef().contentType;
   }
+
   void ssaDefSetType(SSAType &type) {
     assert(kind == SSA_DEF_TYPE);
     ssaDef().contentType = &type;
   }
+
   Block &ssaDefBlock() {
     assert(kind == SSA_DEF_BLOCK);
     return *ssaDef().contentBlock;
   }
-  Function &ssaDefFunction() {
-    assert(kind == SSA_DEF_FUNCTION);
-    return *ssaDef().contentFunction;
+
+  GlobalDef &ssaDefGlobal() {
+    assert(kind == SSA_DEF_GLOBAL);
+    return *ssaDef().contentGlobal;
   }
 
   void ssaDefReplace(Reg reg) {
@@ -576,7 +581,7 @@ public:
 private:
   Kind kind = EMPTY;
   struct {
-    unsigned isImplicit : 1;
+    unsigned isImplicit : 1 = 0;
   } flags;
   Instr *parent = nullptr;
   union {
@@ -591,36 +596,68 @@ private:
   };
 };
 
+class GlobalDef {
+public:
+  enum Kind {
+    FUNCTION,
+    STATIC_MEMORY,
+  };
+  enum class Linkage { EXTERNAL, INTERNAL };
+
+  GlobalDef(Kind kind, std::string name) : kind(kind), name(std::move(name)) {
+    def.emplace<Operand::SSA_DEF_GLOBAL>(nullptr, this);
+  }
+
+  Kind getKind() { return kind; }
+
+  Operand &getDef() { return def; }
+
+  const std::string &getName() const { return name; }
+
+private:
+  Kind kind;
+  Operand def;
+  std::string name;
+};
+
+class StaticMemory : public GlobalDef {
+public:
+  StaticMemory() : GlobalDef(STATIC_MEMORY, std::string()) {}
+
+  size_t size;
+  std::vector<std::byte> initializer;
+};
+
 class Program {
 public:
   Program() {}
 
-  void addFunction(std::unique_ptr<Function> func) {
-    functions.push_back(std::move(func));
-  }
+  Function *getFunction(std::string_view name);
+  Function *createFunction(std::string name);
 
 public:
+  std::unordered_map<std::string_view, Function *> functionIndex;
   std::vector<std::unique_ptr<Function>> functions;
+  std::vector<std::unique_ptr<StaticMemory>> staticMems;
 };
 
-class Function : public IntrusiveList<Block, Function> {
+class Function : public IntrusiveList<Block, Function>, public GlobalDef {
 
 public:
-  Function() { funcDef.emplace<Operand::SSA_DEF_FUNCTION>(nullptr, *this); }
+  Function(std::string name) : GlobalDef(FUNCTION, std::move(name)) {}
 
   Block &getEntry() {
     assert(begin() != end());
     return *begin();
   }
 
-  Operand &getDef() { return funcDef; }
+  Instr *createInstr(unsigned kind);
+  Instr *createInstr(unsigned kind, unsigned cap);
 
-  std::string name;
-  std::vector<SSAType *> argumentTypes;
+  std::vector<SSAType *> paramTypes;
   std::vector<SSAType *> returnTypes;
 
 private:
-  Operand funcDef;
 };
 
 class Block : public IntrusiveList<Instr, Block>,
@@ -673,6 +710,9 @@ public:
     LOAD,
     STORE,
     ALLOCA,
+    REF_FRAME,
+    REF_GLOBAL,
+    REF_PARAM,
     INSTR_END,
     ARCH_INSTR,
   };
@@ -707,12 +747,13 @@ public:
     case CALL:
     case LOAD:
     case STORE:
+    case REF_PARAM:
       return true;
     }
   }
 
   static constexpr const char *kindName(unsigned kind) {
-    switch (kind) {
+    switch ((Kind)kind) {
     case CONST_INT:
       return "CONST_INT";
     case PHI:
@@ -769,8 +810,19 @@ public:
       return "STORE";
     case ALLOCA:
       return "ALLOCA";
+    case REF_FRAME:
+      return "REF_FRAME";
+    case REF_GLOBAL:
+      return "REF_GLOBAL";
+    case REF_PARAM:
+      return "REF_PARAM";
+    case EMPTY:
+    case INSTR_START:
+    case INSTR_END:
+    case ARCH_INSTR:
+      return "INVALID";
     }
-    return "UNKNOWNTARGET";
+    return "UNKOWN";
   }
 
   using iterator = Operand *;
@@ -778,9 +830,9 @@ public:
   iterator begin() { return operands; }
   iterator end() { return operands + capacity; }
   iterator def_begin() { return operands; }
-  iterator def_end() { return operands + numDefs; }
+  iterator def_end() { return other_begin(); }
   iterator other_begin() { return operands + numDefs; }
-  iterator other_end() { return operands + numDefs; }
+  iterator other_end() { return end(); }
 
   Instr(unsigned kind) : kind(kind) {}
   Instr(const Instr &o) = delete;
@@ -797,6 +849,10 @@ public:
   Operand &getDef(unsigned n = 0) {
     assert(numDefs > n);
     return operands[n];
+  }
+  Operand &getOther(unsigned n = 0) {
+    assert(numOther > n);
+    return operands[numDefs + n];
   }
 
   void deleteOperands() {
@@ -865,6 +921,7 @@ public:
   bool isPhi() { return kind == PHI; }
   bool isArtifact() { return kindIsArtifact(kind); }
   bool isTarget() { return kindIsTarget(kind); }
+  bool isCopy() { return kind == COPY; }
 
 private:
   unsigned kind;
@@ -877,4 +934,11 @@ inline SSADef::iterator &SSADef::iterator::operator++() {
   assert(mPtr);
   mPtr = mPtr->ssaUse().chNext;
   return *this;
+}
+
+inline Instr *Function::createInstr(unsigned kind) { return new Instr(kind); }
+inline Instr *Function::createInstr(unsigned kind, unsigned cap) {
+  Instr *i = createInstr(kind);
+  i->allocateOperands(cap);
+  return i;
 }

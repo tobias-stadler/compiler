@@ -216,13 +216,26 @@ let isel = IRPatExecutor {
 
 ir_pat {
   match {
-    CONST_INT def(%c,i32) #imm;
-  }
-  if {
-    $TCInt::canTrunc<12>($ #imm $.imm32())$
+    CONST_INT def(%c,i32) imm32(0);
   }
   emit {
-    riscv::ADDI def(%c,i32) riscv::X0 #imm;
+    COPY def(%c,i32) riscv::X0;
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c,i32) #imm;
+  }
+  emit {
+    riscv::PSEUDO_LI def(%c,i32) #imm;
+  }
+}
+ir_pat {
+  match {
+    REF_GLOBAL def(%gaddr,ptr) %g;
+  }
+  emit {
+    riscv::PSEUDO_LA def(%gaddr,ptr) %g;
   }
 }
 ir_pat {

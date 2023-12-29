@@ -9,6 +9,17 @@
 
 namespace c {
 
+class DeclSpec {
+public:
+  DeclSpec() = default;
+  DeclSpec(Symbol::Kind symbolKind, CountedPtr<Type> type,
+           Type::Qualifier qualifier)
+      : symbolKind(symbolKind), type(std::move(type)), qualifier(qualifier) {}
+  Symbol::Kind symbolKind = Symbol::EMPTY;
+  CountedPtr<Type> type;
+  Type::Qualifier qualifier;
+};
+
 class Parser {
 public:
   Parser(Lexer &lex, SymbolTable &sym) : lex(&lex), sym(&sym) {

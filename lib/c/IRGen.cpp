@@ -21,6 +21,27 @@ namespace c {
 
 namespace {
 
+SSAType &irType(Type::Kind kind) {
+  switch (kind) {
+  case Type::BOOL:
+    return IntSSAType::get(1);
+  case Type::SCHAR:
+  case Type::UCHAR:
+    return IntSSAType::get(8);
+  case Type::SSHORT:
+  case Type::USHORT:
+    return IntSSAType::get(16);
+  case Type::SINT:
+  case Type::UINT:
+    return IntSSAType::get(32);
+  case Type::PTR:
+    return PtrSSAType::get();
+  default:
+    assert(false && "Unsupported type for direct IR conversion");
+    __builtin_unreachable();
+  }
+}
+
 constexpr BrCond irBrCond(AST::Kind kind, bool isSigned) {
   switch (kind) {
   case AST::EQ:
@@ -66,7 +87,7 @@ public:
 
   void allocateStack(StorageInfo &s) {
     assert(s.kind == EMPTY);
-    SSAType &ssaType = Type::irType(s.symbol->getType()->getKind());
+    SSAType &ssaType = irType(s.symbol->getType()->getKind());
     Operand &ptr = ir->emitAlloca(ssaType, 1).getDef();
     s.kind = STACK;
     s.ptr = &ptr;
@@ -126,20 +147,33 @@ public:
   void visitFunctionDefinition(FunctionDefinitionAST &ast) {
     funcAST = &ast;
 
-    ir.createAndSetFunction();
-    ir.getFunc().name = ast.decl.ident;
+    ir.createAndSetFunction(std::string(ast.decl.ident));
     storage.setFunction(ir.getFunc());
     ir.createAndSetBlock();
     SSABuilder::sealBlock(ir.getBlock());
     sym.pushScope(ast.funcScope);
     sym.pushScope(ast.blockScope);
-    /*
-    for (auto [name, idx] : ast.getType().getParamIndex()) {
-      sym.declareSymbol(name,
-                        Symbol(Symbol::AUTO, ast.getType().getParamType(idx)));
+
+    auto returnTypeKind = ast.getType().getBaseType()->getKind();
+    if (returnTypeKind != Type::VOID) {
+      ir.getFunc().returnTypes.push_back(&irType(returnTypeKind));
     }
-    */
+    for (auto [ident, ty] : ast.getType().getParams()) {
+      auto &ssaTy = irType(ty->getKind());
+      ir.getFunc().paramTypes.push_back(&ssaTy);
+      auto *s = sym.getSymbol(ident);
+      assert(s);
+      auto &sInfo = storage.declareLocal(*s);
+      storage.allocateSSA(sInfo);
+
+      tmpSymbol = sInfo.symbol;
+      tmpOperand = nullptr;
+      sema.fromSymbol(*tmpSymbol);
+      store(ir->emitParamRef(ssaTy));
+    }
+
     dispatch(ast.getStatement());
+
     sym.popScope();
     sym.popScope();
     SSARenumberTable::destroy(ir.getFunc());
@@ -148,12 +182,13 @@ public:
   }
 
   void visitDeclaration(DeclarationAST &ast) {
-    if (sym.scope().isFile()) {
-      assert(false && "Global declaration unsupported");
-    } else if (sym.scope().isBlock()) {
-      for (auto &[d, initializer] : ast.declarators) {
-        auto *s = sym.getSymbol(d.ident);
-        assert(s && "Symbol undeclared");
+    for (auto &[d, initializer] : ast.declarators) {
+      auto *s = sym.getSymbol(d.ident);
+      assert(s);
+      if (sym.scope().isFile()) {
+        auto &mem = ir.getProgram().staticMems.emplace_back(
+            std::make_unique<StaticMemory>());
+      } else if (sym.scope().isBlock()) {
         auto &sInfo = storage.declareLocal(*s);
         if (s->isAddrTaken()) {
           storage.allocateStack(sInfo);
@@ -161,22 +196,18 @@ public:
           storage.allocateSSA(sInfo);
         }
         if (initializer) {
-          dispatch(initializer.get());
-          sema.expectRValue();
+          dispatch(*initializer);
+          sema.expectRValueImplicitConv();
           sema.expectTypeKindImplicitConv(sInfo.symbol->getType()->getKind());
           auto rhs = saveExprState();
-          exprStateFromStorageInfo(sInfo);
-          sema.expectLValue();
+
+          tmpSymbol = sInfo.symbol;
+          tmpOperand = nullptr;
+          sema.fromSymbol(*tmpSymbol);
           store(*rhs.tmpOperand);
         }
       }
     }
-  }
-
-  void exprStateFromStorageInfo(StorageBuilder::StorageInfo &s) {
-    tmpSymbol = s.symbol;
-    sema.fromSymbol(*s.symbol);
-    tmpOperand = s.ptr;
   }
 
   void visitCompoundSt(CompoundStAST &ast) {
@@ -196,11 +227,12 @@ public:
   }
 
   void visitVar(VarAST &ast) {
+    tmpOperand = nullptr;
     tmpSymbol = sym.getSymbol(ast.ident);
     if (!tmpSymbol) {
       error("Symbol undeclared");
     }
-    exprStateFromStorageInfo(storage.get(tmpSymbol->getId()));
+    sema.fromSymbol(*tmpSymbol);
   }
 
   void visitUnop(UnopAST &ast) {
@@ -208,6 +240,7 @@ public:
     case AST::ADDR: {
       dispatch(ast.getSubExpression());
       sema.addr();
+      tmpOperand = storage.get(tmpSymbol->getId()).ptr;
       break;
     }
     case AST::DEREF: {
@@ -246,7 +279,7 @@ public:
     switch (ast.getKind()) {
     case AST::ASSIGN: {
       dispatch(ast.getRHS());
-      sema.expectRValue();
+      sema.expectRValueImplicitConv();
       auto rhs = saveExprState();
 
       dispatch(ast.getLHS());
@@ -254,7 +287,7 @@ public:
       auto lhs = saveExprState();
 
       restoreExprState(std::move(rhs));
-      sema.expectTypeKindImplicitConv(lhs.sema.getType()->getKind());
+      sema.expectTypeKindImplicitConv(lhs.sema.getTypeKind());
       rhs = saveExprState();
 
       restoreExprState(std::move(lhs));
@@ -277,7 +310,7 @@ public:
         ir->emitSub(*lhs, *rhs);
         break;
       case AST::MUL:
-        ir->emitMul(*lhs, *rhs, Type::isSigned(sema.getType()->getKind()));
+        ir->emitMul(*lhs, *rhs, Type::isSigned(sema.getTypeKind()));
         break;
       case AST::BIT_AND:
         ir->emitAnd(*lhs, *rhs);
@@ -311,7 +344,7 @@ public:
       if (ast.getKind() == AST::LSHIFT) {
         ir->emitShiftLeft(*tmpOperand, *rhs.tmpOperand);
       } else {
-        if (Type::isSigned(sema.getType()->getKind())) {
+        if (Type::isSigned(sema.getTypeKind())) {
           ir->emitShiftRightArith(*tmpOperand, *rhs.tmpOperand);
         } else {
           ir->emitShiftRightLogical(*tmpOperand, *rhs.tmpOperand);
@@ -327,9 +360,8 @@ public:
     case AST::GT:
     case AST::GTE: {
       auto [lhs, rhs] = genUsualArithBinop(ast);
-      ir->emitCmp(
-          irBrCond(ast.getKind(), Type::isSigned(sema.getType()->getKind())),
-          *lhs, *rhs);
+      ir->emitCmp(irBrCond(ast.getKind(), Type::isSigned(sema.getTypeKind())),
+                  *lhs, *rhs);
       tmpOperand = &ir.getDef();
       sema.fromType(BasicType::create(Type::BOOL));
       break;
@@ -348,13 +380,13 @@ public:
 
   std::pair<Operand *, Operand *> genUsualArithBinop(BinopAST &ast) {
     dispatch(ast.getLHS());
-    sema.expectRValue();
+    sema.expectRValueImplicitConv();
     auto lhs = saveExprState();
 
     dispatch(ast.getRHS());
-    sema.expectRValue();
+    sema.expectRValueImplicitConv();
     Type::Kind commonTyKind = ExpressionSemantics::usualArithConv(
-        lhs.sema.getType()->getKind(), sema.getType()->getKind());
+        lhs.sema.getTypeKind(), sema.getTypeKind());
     sema.expectTypeKindImplicitConv(commonTyKind);
     auto rhs = saveExprState();
 
@@ -365,7 +397,7 @@ public:
 
   Operand *genBoolExpression(AST &expr) {
     dispatch(expr);
-    sema.expectRValue();
+    sema.expectRValueImplicitConv();
     sema.expectTypeKindImplicitConv(Type::BOOL);
     return tmpOperand;
   }
@@ -416,8 +448,8 @@ public:
   void visitReturnSt(ReturnStAST &ast) {
     assert(funcAST);
     if (ast.expr) {
-      dispatch(ast.expr.get());
-      sema.expectRValue();
+      dispatch(*ast.expr);
+      sema.expectRValueImplicitConv();
       assert(funcAST->getType().getBaseType());
       sema.expectTypeImplicitConv(*funcAST->getType().getBaseType());
       ir->emitReturn(*tmpOperand);
@@ -426,7 +458,33 @@ public:
     }
   }
 
-  void error(std::string_view err) {
+  void visitFunctionCall(FunctionCallAST &ast) {
+    dispatch(*ast.child);
+    sema.expectCategory(ExpressionSemantics::LVALUE_SYMBOL);
+    sema.expectTypeKind(Type::FUNC);
+    auto &funcTy = static_cast<FuncType &>(*tmpSymbol->getType());
+    auto *func = ir.getProgram().getFunction(tmpSymbol->getName());
+    assert(func);
+
+    if (ast.args.size() != funcTy.getNumParams()) {
+      error("Number of call arguments doesn't match parameters");
+    }
+    std::vector<Operand *> argOperands;
+    unsigned argNum = 0;
+    for (auto &arg : ast.args) {
+      dispatch(*arg);
+      sema.expectRValueImplicitConv();
+      sema.expectTypeImplicitConv(*funcTy.getParamType(argNum));
+      argOperands.push_back(tmpOperand);
+      ++argNum;
+    }
+    ir->emitCall(*func, argOperands);
+
+    tmpOperand = &ir->getDef();
+    sema.fromType(funcTy.getBaseType());
+  }
+
+  [[noreturn]] void error(std::string_view err) {
     std::cerr << "[IRGen] " << err << "\n";
     assert(false);
     exit(1);
@@ -434,31 +492,47 @@ public:
 
   void store(Operand &operand) {
     if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
+      assert(!tmpOperand);
+      tmpOperand = nullptr;
+      // TODO: check automatic
       auto &s = storage.get(tmpSymbol->getId());
       if (s.kind == StorageBuilder::SSA) {
         SSABuilder::store(tmpSymbol->getId(), operand, ir.getBlock());
         storage.trackSSADef(s, *tmpOperand);
         return;
+      } else if (s.kind == StorageBuilder::STACK) {
+        tmpOperand = s.ptr;
       }
     }
-    ir->emitStore(operand, *tmpOperand);
+
+    if (sema.getCategory() == ExpressionSemantics::LVALUE_MEM || tmpOperand) {
+      ir->emitStore(operand, *tmpOperand);
+      return;
+    }
+    error("Invalid value category for LHS of store");
   }
 
   ExpressionSemantics::Result semanticConvLValue() {
     if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
+      assert(!tmpOperand);
+      tmpOperand = nullptr;
+      // TODO: check automatic
       auto &s = storage.get(tmpSymbol->getId());
       if (s.kind == StorageBuilder::SSA) {
-        tmpOperand = SSABuilder::load(tmpSymbol->getId(),
-                                      Type::irType(sema.getType()->getKind()),
-                                      ir.getBlock());
+        tmpOperand = SSABuilder::load(
+            tmpSymbol->getId(), irType(sema.getTypeKind()), ir.getBlock());
         assert(tmpOperand);
         return ExpressionSemantics::SUCCESS;
+      } else if (s.kind == StorageBuilder::STACK) {
+        tmpOperand = s.ptr;
       }
     }
-
-    ir->emitLoad(Type::irType(sema.getType()->getKind()), *tmpOperand);
-    tmpOperand = &ir.getDef();
-    return ExpressionSemantics::SUCCESS;
+    if (sema.getCategory() == ExpressionSemantics::LVALUE_MEM || tmpOperand) {
+      ir->emitLoad(irType(sema.getTypeKind()), *tmpOperand);
+      tmpOperand = &ir.getDef();
+      return ExpressionSemantics::SUCCESS;
+    }
+    return ExpressionSemantics::ERROR;
   }
 
   ExpressionSemantics::Result semanticConvBool() {
@@ -470,9 +544,9 @@ public:
   }
 
   ExpressionSemantics::Result semanticConvInt(Type::Kind dstKind) {
-    ir->emitExtOrTrunc(Type::isSigned(sema.getType()->getKind()) ? Instr::EXT_S
-                                                                 : Instr::EXT_Z,
-                       Type::irType(dstKind), *tmpOperand);
+    ir->emitExtOrTrunc(Type::isSigned(sema.getTypeKind()) ? Instr::EXT_S
+                                                          : Instr::EXT_Z,
+                       irType(dstKind), *tmpOperand);
     tmpOperand = &ir.getDef();
     // TODO: proper conversion between signed and unsigned
     return ExpressionSemantics::SUCCESS;

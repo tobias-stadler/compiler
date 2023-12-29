@@ -9,4 +9,5 @@ int main() {
     }
     int b = a + 69;
   }
+  return 0;
 }

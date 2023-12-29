@@ -49,26 +49,20 @@ public:
     return {};
   }
 
-  Operand *getTrackedSSADef(Reg reg) {
+  Operand *getSSADef(Reg reg) {
     if (!isVReg(reg)) {
       return nullptr;
     }
     auto &regInfo = getVRegInfo(reg);
-    return regInfo.kind == TRACKED_SSA_DEF ? regInfo.contentSSADef : nullptr;
+    return regInfo.ssaDef;
   }
 
   void lowerSSADef(Reg reg) {
     auto &regInfo = getVRegInfo(reg);
-    assert(regInfo.kind == TRACKED_SSA_DEF);
-    auto &def = *regInfo.contentSSADef;
-    switch (def.getKind()) {
-    case Operand::SSA_DEF_TYPE:
-      regInfo.kind = TYPE;
-      regInfo.contentType = &def.ssaDefType();
-      break;
-    default:
-      break;
-    }
+    assert(regInfo.ssaDef);
+    auto &def = *regInfo.ssaDef;
+    regInfo.ssaDef = nullptr;
+    regInfo.ssaType = &def.ssaDefType();
     ssaDefToReg.erase(&def);
   }
 
@@ -90,21 +84,13 @@ public:
   iterator end() { return nextVReg; }
 
 private:
-  enum VRegKind {
-    TRACKED_SSA_DEF,
-    REGCLASS,
-    TYPE,
-  };
   struct VRegInfo {
-    VRegInfo(SSAType &type) : kind(TYPE), contentType(&type) {}
-    VRegInfo(Operand &ssaDef) : kind(TRACKED_SSA_DEF), contentSSADef(&ssaDef) {}
+    VRegInfo(SSAType &type) : ssaType(&type) {}
+    VRegInfo(Operand &ssaDef) : ssaDef(&ssaDef) {}
 
-    VRegKind kind;
-    union {
-      Operand *contentSSADef;
-      SSAType *contentType;
-      unsigned contentRegClass;
-    };
+    Operand *ssaDef = nullptr;
+    SSAType *ssaType = nullptr;
+    unsigned regClass = 0;
   };
 
   VRegInfo &getVRegInfo(Reg reg) {
@@ -155,16 +141,12 @@ class PrintRegTrackingPass : public IRPass<Function> {
     for (int i = 0; i < regTrack.vRegs.size(); ++i) {
       auto &reg = regTrack.vRegs[i];
       std::cout << (i + regTrack.firstVReg) << ": ";
-      switch (reg.kind) {
-      case RegTracking::TRACKED_SSA_DEF:
-        printer.printNumberedDef(*reg.contentSSADef);
-        break;
-      case RegTracking::REGCLASS:
-        printer.printRegClass(reg.contentRegClass);
-        break;
-      case RegTracking::TYPE:
-        printer.printSSAType(*reg.contentType);
-        break;
+      if (reg.ssaDef) {
+        printer.printNumberedDef(*reg.ssaDef);
+      } else if (reg.ssaType) {
+        printer.printSSAType(*reg.ssaType);
+      } else {
+        printer.printRegClass(reg.regClass);
       }
       std::cout << "\n";
     }

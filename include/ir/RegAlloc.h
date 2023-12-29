@@ -106,7 +106,7 @@ class RegRewritePass : public IRPass<Function> {
     // Rewrite SSA Defs
     for (Reg currReg = regTrack.begin(); currReg != regTrack.end();
          currReg = currReg + 1) {
-      auto *op = regTrack.getTrackedSSADef(currReg);
+      auto *op = regTrack.getSSADef(currReg);
       auto it = regAlloc.vRegToPhys.find(currReg);
       if (!op)
         continue;

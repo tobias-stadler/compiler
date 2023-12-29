@@ -29,6 +29,7 @@ void DominatorTreePass::dfs(Block &block, int parentId) {
   tree->dfsPreorderParent.push_back(parentId);
   ++tree->numBlocks;
 
+  // TODO: fix early returns
   Instr &term = static_cast<Instr &>(block.getSentryEnd().getPrevNode());
   switch (term.getKind()) {
   case Instr::BR:

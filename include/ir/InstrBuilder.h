@@ -4,6 +4,7 @@
 #include "support/IntrusiveList.h"
 #include <cassert>
 #include <numbers>
+#include <span>
 
 class InstrPtr {
 public:
@@ -165,6 +166,27 @@ public:
     return *i;
   }
 
+  Instr &emitCopy(Reg dst, Operand &src) {
+    assert(src.isSSARegDef());
+    assert(dst);
+    Instr *i = new Instr(Instr::COPY);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::REG_DEF>(dst);
+    i->emplaceOperand<Operand::SSA_USE>(src);
+    emit(i);
+    return *i;
+  }
+
+  Instr &emitCopy(SSAType &type, Reg src) {
+    assert(src);
+    Instr *i = new Instr(Instr::COPY);
+    i->allocateOperands(2);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i->emplaceOperand<Operand::REG_USE>(src);
+    emit(i);
+    return *i;
+  }
+
   Instr &emitExtOrTrunc(Instr::Kind kind, SSAType &type, Operand &val) {
     assert(val.ssaDefType().getKind() == SSAType::INT &&
            type.getKind() == SSAType::INT);
@@ -179,18 +201,20 @@ public:
     }
   }
 
-  Instr &emitCall(Function &func, std::initializer_list<Operand *> args) {
-    assert(args.size() == func.argumentTypes.size() &&
-           "Invalid number of arrguments");
+  Instr &emitCall(Function &func, std::span<Operand *> args) {
+    assert(args.size() == func.paramTypes.size() &&
+           "Invalid number of arguments");
     Instr *i = new Instr(Instr::CALL);
-    i->allocateOperands(func.returnTypes.size() + args.size());
+    i->allocateOperands(func.returnTypes.size() + 1 + args.size());
     for (auto *ty : func.returnTypes) {
       assert(ty);
       i->emplaceOperand<Operand::SSA_DEF_TYPE>(*ty);
     }
+    i->emplaceOperand<Operand::SSA_USE>(func.getDef());
     unsigned argNum = 0;
     for (auto *arg : args) {
-      assert(arg && arg->ssaDefType() == *func.argumentTypes[argNum]);
+      assert(arg && arg->ssaDefType() == *func.paramTypes[argNum]);
+      ++argNum;
       i->emplaceOperand<Operand::SSA_USE>(*arg);
     }
     emit(i);
@@ -208,6 +232,22 @@ public:
     Instr *i = new Instr(Instr::RET);
     emit(i);
     return *i;
+  }
+
+  Operand &emitParamRef(SSAType &ty) {
+    Instr *i = new Instr(Instr::REF_PARAM);
+    i->allocateOperands(1);
+    i->emplaceOperand<Operand::SSA_DEF_TYPE>(ty);
+    emit(i);
+    return i->getDef();
+  }
+
+  Operand &emitGlobalRef(GlobalDef &global) {
+    Instr *i = new Instr(Instr::REF_GLOBAL);
+    i->allocateOperands(1);
+    i->emplaceOperand<Operand::SSA_DEF_GLOBAL>(global);
+    emit(i);
+    return i->getDef();
   }
 
   Instr &emitAlloca(SSAType &eleType, unsigned numEle) {

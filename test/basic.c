@@ -1,3 +1,5 @@
+static int global_x;
+
 int do_sth(int a, int b) {
   return a + b;
 }

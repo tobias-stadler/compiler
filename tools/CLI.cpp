@@ -55,6 +55,10 @@ int main(int argc, char *argv[]) {
   IRPipeline<Program> progPipeline(&arch);
   IRPipeline<Function> funcPipeline(&arch);
 
+  riscv::PreISelExpansion expansion;
+  riscv::PreISelCombine combine;
+  riscv::InstrSelect isel;
+
   funcPipeline.addLazyPass(std::make_unique<DominatorTreePass>());
   funcPipeline.addLazyPass(std::make_unique<LivenessFlowPass>());
   funcPipeline.addLazyPass(std::make_unique<LiveIntervalsPass>());
@@ -62,29 +66,33 @@ int main(int argc, char *argv[]) {
   funcPipeline.addPass(std::make_unique<PrintIRPass>());
   // pipeline.addPass(std::make_unique<PrintIRPass>());
   // pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
+  bool doCodegen = true;
+  if (doCodegen) {
+    funcPipeline.addPass(std::make_unique<riscv::ABILoweringPass>());
+    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<InstrExpansionPass>(expansion));
+    funcPipeline.addPass(std::make_unique<InstrCombinePass>(combine));
+    funcPipeline.addPass(std::make_unique<InstrSelectPass>(isel));
+    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<PhiIsolationPass>());
+    funcPipeline.addPass(std::make_unique<RegTrackingPass>());
+    funcPipeline.addPass(std::make_unique<PhiDestructionPass>());
 
-  riscv::PreISelExpansion expansion;
-  riscv::PreISelCombine combine;
-  riscv::InstrSelect isel;
-  funcPipeline.addPass(std::make_unique<InstrExpansionPass>(expansion));
-  funcPipeline.addPass(std::make_unique<InstrCombinePass>(combine));
-  funcPipeline.addPass(std::make_unique<InstrSelectPass>(isel));
-  funcPipeline.addPass(std::make_unique<PrintIRPass>());
-  funcPipeline.addPass(std::make_unique<PhiIsolationPass>());
-  funcPipeline.addPass(std::make_unique<RegTrackingPass>());
-  funcPipeline.addPass(std::make_unique<PhiDestructionPass>());
-
-  funcPipeline.addPass(std::make_unique<PrintIRPass>());
-  funcPipeline.addPass(std::make_unique<PrintRegTrackingPass>());
-  funcPipeline.addPass(std::make_unique<PrintLivenessFlowPass>());
-  funcPipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
-  funcPipeline.addPass(std::make_unique<RegAllocPass>());
-  funcPipeline.addPass(std::make_unique<RegRewritePass>());
-  funcPipeline.addPass(std::make_unique<riscv::PostRALowering>());
-  funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<PrintRegTrackingPass>());
+    funcPipeline.addPass(std::make_unique<PrintLivenessFlowPass>());
+    funcPipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
+    funcPipeline.addPass(std::make_unique<RegAllocPass>());
+    funcPipeline.addPass(std::make_unique<RegRewritePass>());
+    funcPipeline.addPass(std::make_unique<riscv::PostRALowering>());
+    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+  }
 
   progPipeline.addPass(std::make_unique<FunctionPipelinePass>(funcPipeline));
-  progPipeline.addPass(std::make_unique<riscv::AsmPrinterPass>(std::cout));
+
+  if (doCodegen) {
+    progPipeline.addPass(std::make_unique<riscv::AsmPrinterPass>(std::cout));
+  }
 
   progPipeline.run(*prog);
 

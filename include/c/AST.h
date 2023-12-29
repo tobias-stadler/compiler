@@ -347,18 +347,19 @@ public:
 
 class DeclarationAST : public AST {
 public:
-  DeclarationAST() : AST(DECLARATION) {}
+  DeclarationAST(Symbol::Kind symbolKind) : AST(DECLARATION), symbolKind(symbolKind) {}
 
-  DeclSpec spec;
+  Symbol::Kind symbolKind = Symbol::EMPTY;
   std::vector<std::pair<DeclaratorAST, Ptr>> declarators;
 };
 
 class FunctionDefinitionAST : public AST {
 public:
-  FunctionDefinitionAST(DeclSpec spec, DeclaratorAST decl)
-      : AST(FUNCTION_DEFINITION), spec(std::move(spec)), decl(std::move(decl)),
+  FunctionDefinitionAST(Symbol::Kind symbolKind, DeclaratorAST decl)
+      : AST(FUNCTION_DEFINITION), symbolKind(symbolKind), decl(std::move(decl)),
         funcScope(Scope::FUNC), blockScope(Scope::BLOCK) {}
-  DeclSpec spec;
+
+  Symbol::Kind symbolKind = Symbol::EMPTY;
   DeclaratorAST decl;
   Ptr st;
   Scope funcScope;

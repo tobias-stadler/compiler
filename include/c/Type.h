@@ -47,11 +47,11 @@ public:
               bool qRestrict = false, bool qAtomic = false)
         : qConst(qConst), qVolatile(qVolatile), qRestrict(qRestrict),
           qAtomic(qAtomic) {}
-    bool isConst() { return qConst; }
-    bool isVolatile() { return qVolatile; }
-    bool isRestrict() { return qRestrict; }
-    bool isAtomic() { return qAtomic; }
-    bool onlyConst() { return !(qRestrict || qVolatile || qAtomic); }
+    bool isConst() const { return qConst; }
+    bool isVolatile() const { return qVolatile; }
+    bool isRestrict() const { return qRestrict; }
+    bool isAtomic() const { return qAtomic; }
+    bool onlyConst() const { return !(qRestrict || qVolatile || qAtomic); }
 
   private:
     bool qConst, qVolatile, qRestrict, qAtomic;
@@ -59,6 +59,8 @@ public:
   virtual ~Type() = default;
 
   Kind getKind() const { return kind; }
+
+  const Qualifier &getQualifier() const { return qualifier; }
 
   static constexpr bool isBasic(Kind kind) {
     return kind > BASIC_START && kind < BASIC_END;
@@ -85,27 +87,6 @@ public:
     }
   }
 
-  static SSAType &irType(Type::Kind kind) {
-    switch (kind) {
-    case Type::BOOL:
-      return IntSSAType::get(1);
-    case Type::SCHAR:
-    case Type::UCHAR:
-      return IntSSAType::get(8);
-    case Type::SSHORT:
-    case Type::USHORT:
-      return IntSSAType::get(16);
-    case Type::SINT:
-    case Type::UINT:
-      return IntSSAType::get(32);
-    case Type::PTR:
-      return PtrSSAType::get();
-    default:
-      assert(false && "Unsupported type for direct IR conversion");
-      __builtin_unreachable();
-    }
-  }
-
   static constexpr int NUM_BASIC = BASIC_END - BASIC_START - 1;
 
   friend bool operator==(const Type &a, const Type &b);
@@ -114,10 +95,10 @@ public:
 
 protected:
   Type(Kind kind, Qualifier qualifier) : kind(kind), qualifier(qualifier) {}
+  Qualifier qualifier;
 
 private:
   Kind kind;
-  Qualifier qualifier;
 };
 
 class DerivedType : public Type {
@@ -178,18 +159,23 @@ public:
 class FuncType : public DerivedType {
 public:
   FuncType() : DerivedType(FUNC, nullptr, Qualifier()) {}
-  CountedPtr<Type> &getParamType(size_t i) { return paramTypes[i]; }
-  size_t getNumParams() { return paramTypes.size(); };
+
+  CountedPtr<Type> &getParamType(size_t i) { return params[i].second; }
+
+  std::string_view getParamName(size_t i) { return params[i].first; }
+
+  size_t getNumParams() { return params.size(); };
+
   void addParam(CountedPtr<Type> type) {
-    paramTypes.push_back(std::move(type));
+    params.emplace_back(std::string_view(), std::move(type));
   }
 
   bool addNamedParam(std::string_view name, CountedPtr<Type> type) {
-    auto [_, succ] = paramIndex.try_emplace(name, paramTypes.size());
+    auto [_, succ] = paramIndex.try_emplace(name, params.size());
     if (!succ) {
       return false;
     }
-    addParam(std::move(type));
+    params.emplace_back(name, std::move(type));
     return true;
   }
 
@@ -198,14 +184,14 @@ public:
     if (it == paramIndex.end()) {
       return nullptr;
     }
-    return paramTypes[it->second].get();
+    return params[it->second].second.get();
   }
 
-  auto &getParamTypes() { return paramTypes; }
-  auto &getParamIndex() { return paramIndex; }
+  const auto &getParams() { return params; }
+  const auto &getParamIndex() { return paramIndex; }
 
 private:
-  std::vector<CountedPtr<Type>> paramTypes;
+  std::vector<std::pair<std::string_view, CountedPtr<Type>>> params;
   std::unordered_map<std::string_view, size_t> paramIndex;
 };
 
@@ -234,6 +220,8 @@ public:
     addMember(type);
     return true;
   }
+
+  void setQualifier(Qualifier quali) { qualifier = quali; }
 
   std::vector<CountedPtr<Type>> members;
 

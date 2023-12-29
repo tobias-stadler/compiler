@@ -116,6 +116,9 @@ public:
 
   IntrusiveListNode<N, P> &getSentryBegin() { return sentryBegin; }
   IntrusiveListNode<N, P> &getSentryEnd() { return sentryEnd; }
+  IntrusiveListNode<N, P> &getFirstSentry() {
+    return getSentryBegin().getNextNode();
+  }
 
   class iterator {
   public:

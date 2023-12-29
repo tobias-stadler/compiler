@@ -557,17 +557,25 @@ ASTPtrResult Parser::parseDeclaration() {
       return error("Function declarator must declare function");
     }
 
+    auto ast = std::make_unique<FunctionDefinitionAST>(spec->symbolKind,
+                                                       decl.moveRes());
+    Symbol::Kind symbolKind = sym->scope().getSymbolKind(ast->symbolKind);
+
+    if (!(symbolKind == Symbol::EXTERN || symbolKind == Symbol::STATIC)) {
+      return error("Invalid storage class for function");
+    }
     auto *s =
-        sym->declareSymbol(decl->ident, Symbol(Symbol::EXTERN, decl->type));
+        sym->declareSymbol(Symbol(symbolKind, ast->decl.type, decl->ident));
     // TODO: prototype support
     if (!s) {
       return error("Function redefined");
     }
 
-    auto ast =
-        std::make_unique<FunctionDefinitionAST>(spec.moveRes(), decl.moveRes());
     sym->pushScope(ast->funcScope);
     sym->pushScope(ast->blockScope);
+    for (auto [ident, ty] : ast->getType().getParams()) {
+      sym->declareSymbol(Symbol(Symbol::AUTO, ty, ident));
+    }
     auto st = parseCompoundStatement();
     if (!st) {
       return error("Expected compound statement in function definition");
@@ -579,7 +587,7 @@ ASTPtrResult Parser::parseDeclaration() {
     return ast;
   }
 
-  auto ast = std::make_unique<DeclarationAST>();
+  auto ast = std::make_unique<DeclarationAST>(spec->symbolKind);
   while (true) {
     AST::Ptr initializer = nullptr;
     if (lex->matchNextToken(Token::PUNCT_EQ)) {
@@ -604,16 +612,13 @@ ASTPtrResult Parser::parseDeclaration() {
     return error("Expected semicolon after declaration");
   }
 
-  if (sym->scope().isFile()) {
-    // TODO: global variable declaration in symbol table
-    assert(false && "global variable declaration unsupported");
-  } else {
-    for (auto &[d, _] : ast->declarators) {
-      // TOOD: proper handling of storage spec
-      auto *s = sym->declareSymbol(d.ident, Symbol(Symbol::AUTO, d.type));
-      if (!s) {
-        return error(std::string("Symbol redeclared: ") + std::string(d.ident));
-      }
+  Symbol::Kind symbolKind = sym->scope().getSymbolKind(ast->symbolKind);
+  // TODO: verify symbolKind
+
+  for (auto &[d, _] : ast->declarators) {
+    auto *s = sym->declareSymbol(Symbol(symbolKind, d.type, d.ident));
+    if (!s) {
+      return error(std::string("Symbol redeclared: ") + std::string(d.ident));
     }
   }
   return ast;
@@ -626,14 +631,15 @@ ASTResult<std::unique_ptr<TranslationUnitAST>> Parser::parseTranslationUnit() {
     auto declRes = parseDeclaration();
     if (!declRes) {
       if (declRes.isNop()) {
-        sym->popScope();
-        return tu;
+        break;
       } else {
         return error("Expected external declaration");
       }
     }
     tu->declarations.push_back(declRes.moveRes());
   }
+  sym->popScope();
+  return tu;
 }
 
 ASTPtrResult Parser::parseCompoundStatement() {
@@ -816,7 +822,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
   bool isNop = true;
   Type::Qualifier qualifier = Type::Qualifier();
   Symbol::Kind storageKind = Symbol::EMPTY;
-  CountedPtr<Type> type;
+  CountedPtr<StructType> structType;
   std::vector<Token::Kind> typeSpecs;
   int qConst = 0;
   int qVolatile = 0;
@@ -845,14 +851,14 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
     case Token::KEYWORD_STRUCT:
     case Token::KEYWORD_UNION:
       if (enableTypeSpec) {
-        if (type) {
-          return error("Specified multiple types");
+        if (structType) {
+          return error("Specified multiple struct types");
         }
         auto tyRes = parseStruct();
         if (!tyRes) {
           return error("Expected struct/union");
         }
-        type = tyRes.moveRes();
+        structType = tyRes.moveRes();
         break;
       } else {
         goto done;
@@ -899,7 +905,7 @@ done:
       default:
         break;
       case Token::KEYWORD_TYPEDEF:
-        storageKind = Symbol::TYPE;
+        storageKind = Symbol::TYPEDEF;
         break;
       case Token::KEYWORD_EXTERN:
         storageKind = Symbol::EXTERN;
@@ -921,11 +927,14 @@ done:
   if (enableTypeQuali) {
     qualifier = Type::Qualifier(qConst, qVolatile, qRestrict);
   }
+  CountedPtr<Type> type = nullptr;
   if (enableTypeSpec) {
-    if (type) {
+    if (structType) {
       if (typeSpecs.size() != 0) {
         return error("Specified type and type specifier");
       }
+      structType->setQualifier(qualifier);
+      type = std::move(structType);
     } else {
       std::sort(typeSpecs.begin(), typeSpecs.end());
       auto it = typeSpecSets.find(typeSpecs);

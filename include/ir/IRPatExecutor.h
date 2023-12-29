@@ -39,7 +39,7 @@ public:
         auto &instr = *it;
         --it;
 
-        if (instr.isPhi() || instr.isTarget()) {
+        if (instr.isPhi() || instr.isTarget() || instr.isCopy()) {
           continue;
         }
         if (!exec->execute(instr)) {

@@ -115,3 +115,20 @@ IntrusiveListNode<Instr, Block> &Block::getFirstNonPhiSentry() {
 }
 
 Instr &SSAUse::getDefInstr() const { return getDef().getParent(); }
+
+Function *Program::getFunction(std::string_view name) {
+  auto it = functionIndex.find(name);
+  if (it == functionIndex.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+Function *Program::createFunction(std::string name) {
+  auto func = std::make_unique<Function>(std::move(name));
+  auto [it, succ] = functionIndex.try_emplace(func->getName(), func.get());
+  if (!succ) {
+    return nullptr;
+  }
+  return functions.emplace_back(std::move(func)).get();
+}

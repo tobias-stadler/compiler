@@ -24,8 +24,8 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
     case Operand::SSA_DEF_BLOCK:
       std::cout << "unnamed block";
       break;
-    case Operand::SSA_DEF_FUNCTION:
-      std::cout << "unnamed function";
+    case Operand::SSA_DEF_GLOBAL:
+      std::cout << op.ssaDefGlobal().getName();
       break;
     default:
       assert(false);
@@ -117,7 +117,6 @@ void PrintIRVisitor::visitOperand(Operand &op) {
     printNumberedDef(op.ssaUse().getDef());
     break;
   case Operand::SSA_DEF_BLOCK:
-  case Operand::SSA_DEF_FUNCTION:
     std::cout << "unnamed";
     break;
   case Operand::REG_USE:

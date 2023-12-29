@@ -12,10 +12,9 @@ public:
     return *program;
   }
 
-  Function &createAndSetFunction() {
-    auto func = std::make_unique<Function>();
-    currFunc = func.get();
-    program->addFunction(std::move(func));
+  Function &createAndSetFunction(std::string name) {
+    currFunc = program->createFunction(std::move(name));
+    assert(currFunc);
     return *currFunc;
   }
 
@@ -39,7 +38,6 @@ public:
   }
 
   Block &createAndSetBlock() {
-    assert(!currBlock);
     setBlock(createBlock());
     return *currBlock;
   }
@@ -57,6 +55,11 @@ public:
   Operand &getDef() {
     assert(instr.getLastInstr());
     return instr.getLastInstr()->getDef();
+  }
+
+  Program &getProgram() {
+    assert(program);
+    return *program;
   }
 
   std::unique_ptr<Program> endProgram() { return std::move(program); }

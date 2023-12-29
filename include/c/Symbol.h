@@ -11,10 +11,11 @@ class Symbol {
   friend class SymbolTable;
 
 public:
-  enum Kind { EMPTY, TYPE, EXTERN, STATIC, AUTO, REGISTER };
-  enum StorageKind { SSA, ALLOCA };
-  Symbol(Kind kind, CountedPtr<Type> type)
-      : kind(kind), type(std::move(type)) {}
+  enum Kind { EMPTY, TYPEDEF, EXTERN, STATIC, AUTO, REGISTER };
+  enum class Linkage { EXTERNAL, INTERNAL, NONE };
+  enum class StorageDuration { STATIC, THREAD, AUTOMATIC, ALLOCATED, NONE };
+  Symbol(Kind kind, CountedPtr<Type> type, std::string_view name)
+      : kind(kind), type(std::move(type)), name(name) {}
 
   Kind getKind() { return kind; }
 
@@ -25,10 +26,38 @@ public:
   bool isAddrTaken() { return addrTaken; }
   void setAddrTaken(bool taken) { addrTaken = taken; }
 
+  Linkage getLinkage() {
+    switch (kind) {
+    case EXTERN:
+      return Linkage::EXTERNAL;
+    case STATIC:
+      return Linkage::INTERNAL;
+    default:
+      return Linkage::NONE;
+    }
+  }
+
+  StorageDuration getStorageDuration() {
+    switch (kind) {
+    case EXTERN:
+    case STATIC:
+      return StorageDuration::STATIC;
+    case AUTO:
+    case REGISTER:
+      return StorageDuration::AUTOMATIC;
+    case EMPTY:
+    case TYPEDEF:
+      return StorageDuration::NONE;
+    }
+  }
+
+  std::string_view getName() const { return name; }
+
 private:
   Kind kind;
   CountedPtr<Type> type;
   SSASymbolId id = 0;
+  std::string_view name;
   bool addrTaken = false;
 };
 
@@ -44,6 +73,24 @@ public:
 
   bool isFile() { return kind == FILE; };
   bool isBlock() { return kind == BLOCK; };
+
+  Symbol::Kind getSymbolKind(Symbol::Kind symbolKind) {
+    if (symbolKind != Symbol::EMPTY) {
+      return symbolKind;
+    }
+    return getDefaultSymbolKind();
+  }
+
+  Symbol::Kind getDefaultSymbolKind() {
+    switch (kind) {
+    case FILE:
+      return Symbol::EXTERN;
+    case BLOCK:
+      return Symbol::AUTO;
+    default:
+      return Symbol::EMPTY;
+    }
+  }
 
 private:
   Kind kind;
@@ -89,9 +136,10 @@ public:
 
   void clearScopeStack() { scopes.clear(); }
 
-  Symbol *declareSymbol(std::string_view name, Symbol symbol) {
+  Symbol *declareSymbol(Symbol symbol) {
     symbol.id = nextSymId;
-    Symbol *sym = scope().declareSymbol(declareIdent(name), std::move(symbol));
+    Symbol *sym =
+        scope().declareSymbol(declareIdent(symbol.name), std::move(symbol));
     if (!sym) {
       return nullptr;
     }
@@ -124,17 +172,6 @@ private:
   std::unordered_map<std::string_view, IdentId> identIdMap;
   IdentId nextIdentId = 1;
   SSASymbolId nextSymId = 1;
-};
-
-class DeclSpec {
-public:
-  DeclSpec() = default;
-  DeclSpec(Symbol::Kind symbolKind, CountedPtr<Type> type,
-           Type::Qualifier qualifier)
-      : symbolKind(symbolKind), type(std::move(type)), qualifier(qualifier) {}
-  Symbol::Kind symbolKind = Symbol::EMPTY;
-  CountedPtr<Type> type;
-  Type::Qualifier qualifier;
 };
 
 inline Symbol *Scope::declareSymbol(IdentId identId, Symbol symbol) {
