@@ -66,8 +66,7 @@ public:
       return def;
     }
     if (!renum.sealed) {
-      auto phi = InstrBuilder().buildPhi(type);
-      block.insertBegin(phi.get());
+      auto phi = InstrBuilder(block.getFirstSentry()).emitPhi(type);
       def = &phi->getDef();
       renum.set(id, def);
       renum.incompletePhis.emplace_back(phi.get(), id);
@@ -98,8 +97,7 @@ public:
       return nullptr;
     }
     renum.marked = true;
-    auto phi = InstrBuilder().buildPhi(type);
-    block.insertBegin(phi.get());
+    auto phi = InstrBuilder(block.getFirstSentry()).emitPhi(type);
     def = &phi->getDef();
     renum.set(id, def);
     populatePhi(phi, id);

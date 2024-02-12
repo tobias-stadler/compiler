@@ -24,9 +24,15 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
     case Operand::SSA_DEF_BLOCK:
       std::cout << "unnamed block";
       break;
-    case Operand::SSA_DEF_GLOBAL:
-      std::cout << op.ssaDefGlobal().getName();
+    case Operand::SSA_DEF_OTHER: {
+      OtherSSADef &def = op.ssaDefOther();
+      if (def.isGlobal()) {
+        std::cout << def.global().getName();
+      } else {
+        std::cout << "unkown def";
+      }
       break;
+    }
     default:
       assert(false);
       break;

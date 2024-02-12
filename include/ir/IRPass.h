@@ -60,7 +60,7 @@ public:
     void *dataPtr = nullptr;
     if (it == publisher.end()) {
       auto &pass = getAdvertisingPass(&T::ID);
-      std::cout << "!!Running pass in query: " << pass.name() << "!!\n";
+      std::cout << "----> Running pass in query: " << pass.name() << "\n";
       run(pass, *ctx.obj);
       auto it2 = publisher.find(&T::ID);
       assert(it2 != publisher.end() &&
@@ -153,7 +153,7 @@ public:
   void run(PassT &passObj) {
     info.reset();
     for (auto &pass : sequencedPasses) {
-      std::cout << "!!Running pass: " << pass->name() << "!!\n";
+      std::cout << "--> Running pass: " << pass->name() << "\n";
       info.run(*pass, passObj);
     }
   }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ir/FrameLayout.h"
 #include "ir/IR.h"
 #include "support/IntrusiveList.h"
 #include <cassert>
@@ -20,8 +21,9 @@ protected:
 
 class PhiInstrPtr : public InstrPtr {
 public:
+  PhiInstrPtr(Instr &instr) : InstrPtr(&instr) {}
   PhiInstrPtr(Instr *instr) : InstrPtr(instr) {
-    assert(instr->getKind() == Instr::PHI);
+    assert(instr && instr->getKind() == Instr::PHI);
   }
 
   void setupPredecessors(unsigned numPreds) {
@@ -79,37 +81,49 @@ public:
 
   Instr *getLastInstr() { return lastInstr; }
 
+  Block &getBlock() {
+    assert(insertionPoint);
+    return insertionPoint->getParent();
+  }
+
+  Function &getFunction() { return getBlock().getParent(); }
+
   Operand &getDef(unsigned n = 0) {
     assert(lastInstr);
     return lastInstr->getDef(n);
   }
 
-  void emit(Instr *instr) {
+  Instr &emit(Instr *instr) {
     assert(insertionPoint);
     insertionPoint->insertPrev(instr);
     lastInstr = instr;
+    return *instr;
+  }
+
+  Instr &emitInstr(unsigned kind) {
+    return emit(getFunction().createInstr(kind));
+  }
+
+  Instr &emitInstr(unsigned kind, unsigned cap) {
+    return emit(getFunction().createInstr(kind, cap));
   }
 
   Instr &emitConstInt(SSAType &type, int32_t val) {
     // TODO: assert that type can construct constant
     assert(type.getKind() == SSAType::INT);
-    Instr *i = new Instr(Instr::CONST_INT);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-    i->emplaceOperand<Operand::IMM32>(val);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::CONST_INT, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i.emplaceOperand<Operand::IMM32>(val);
+    return i;
   }
 
   Instr &emitBinop(Instr::Kind kind, Operand &lhs, Operand &rhs) {
     assert(lhs.ssaDefType() == rhs.ssaDefType());
-    Instr *i = new Instr(kind);
-    i->allocateOperands(3);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(lhs.ssaDefType());
-    i->emplaceOperand<Operand::SSA_USE>(lhs);
-    i->emplaceOperand<Operand::SSA_USE>(rhs);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(kind, 3);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(lhs.ssaDefType());
+    i.emplaceOperand<Operand::SSA_USE>(lhs);
+    i.emplaceOperand<Operand::SSA_USE>(rhs);
+    return i;
   }
 
   Instr &emitShiftLeft(Operand &lhs, Operand &rhs) {
@@ -122,10 +136,10 @@ public:
     return emitBinop(Instr::SR_A, lhs, rhs);
   }
 
-  PhiInstrPtr buildPhi(SSAType &type) {
-    Instr *i = new Instr(Instr::PHI);
-    i->allocateVariadicOperands(1);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+  PhiInstrPtr emitPhi(SSAType &type) {
+    Instr &i = emitInstr(Instr::PHI);
+    i.allocateVariadicOperands(1);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     return i;
   }
 
@@ -135,12 +149,10 @@ public:
            type.getKind() == SSAType::INT);
     assert(static_cast<IntSSAType &>(type).getBits() >
            static_cast<IntSSAType &>(val.ssaDefType()).getBits());
-    Instr *i = new Instr(kind);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-    i->emplaceOperand<Operand::SSA_USE>(val);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(kind, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i.emplaceOperand<Operand::SSA_USE>(val);
+    return i;
   }
 
   Instr &emitTrunc(SSAType &type, Operand &val) {
@@ -148,43 +160,35 @@ public:
            type.getKind() == SSAType::INT);
     assert(static_cast<IntSSAType &>(type).getBits() <
            static_cast<IntSSAType &>(val.ssaDefType()).getBits());
-    Instr *i = new Instr(Instr::TRUNC);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-    i->emplaceOperand<Operand::SSA_USE>(val);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::TRUNC, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i.emplaceOperand<Operand::SSA_USE>(val);
+    return i;
   }
 
   Instr &emitCopy(Operand &val) {
     assert(val.isSSARegDef());
-    Instr *i = new Instr(Instr::COPY);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
-    i->emplaceOperand<Operand::SSA_USE>(val);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::COPY, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(val.ssaDefType());
+    i.emplaceOperand<Operand::SSA_USE>(val);
+    return i;
   }
 
   Instr &emitCopy(Reg dst, Operand &src) {
     assert(src.isSSARegDef());
     assert(dst);
-    Instr *i = new Instr(Instr::COPY);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::REG_DEF>(dst);
-    i->emplaceOperand<Operand::SSA_USE>(src);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::COPY, 2);
+    i.emplaceOperand<Operand::REG_DEF>(dst);
+    i.emplaceOperand<Operand::SSA_USE>(src);
+    return i;
   }
 
   Instr &emitCopy(SSAType &type, Reg src) {
     assert(src);
-    Instr *i = new Instr(Instr::COPY);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-    i->emplaceOperand<Operand::REG_USE>(src);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::COPY, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i.emplaceOperand<Operand::REG_USE>(src);
+    return i;
   }
 
   Instr &emitExtOrTrunc(Instr::Kind kind, SSAType &type, Operand &val) {
@@ -204,111 +208,92 @@ public:
   Instr &emitCall(Function &func, std::span<Operand *> args) {
     assert(args.size() == func.paramTypes.size() &&
            "Invalid number of arguments");
-    Instr *i = new Instr(Instr::CALL);
-    i->allocateOperands(func.returnTypes.size() + 1 + args.size());
+    Instr &i =
+        emitInstr(Instr::CALL, func.returnTypes.size() + 1 + args.size());
     for (auto *ty : func.returnTypes) {
       assert(ty);
-      i->emplaceOperand<Operand::SSA_DEF_TYPE>(*ty);
+      i.emplaceOperand<Operand::SSA_DEF_TYPE>(*ty);
     }
-    i->emplaceOperand<Operand::SSA_USE>(func.getDef());
+    i.emplaceOperand<Operand::SSA_USE>(func.getDef());
     unsigned argNum = 0;
     for (auto *arg : args) {
       assert(arg && arg->ssaDefType() == *func.paramTypes[argNum]);
+      i.emplaceOperand<Operand::SSA_USE>(*arg);
       ++argNum;
-      i->emplaceOperand<Operand::SSA_USE>(*arg);
     }
-    emit(i);
-    return *i;
+    return i;
   }
 
   Instr &emitReturn(Operand &val) {
-    Instr *i = new Instr(Instr::RET);
-    i->allocateOperands(1);
-    i->emplaceOperand<Operand::SSA_USE>(val);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::RET, 1);
+    i.emplaceOperand<Operand::SSA_USE>(val);
+    return i;
   }
   Instr &emitReturn() {
-    Instr *i = new Instr(Instr::RET);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::RET);
+    return i;
   }
 
   Operand &emitParamRef(SSAType &ty) {
-    Instr *i = new Instr(Instr::REF_PARAM);
-    i->allocateOperands(1);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(ty);
-    emit(i);
-    return i->getDef();
+    Instr &i = emitInstr(Instr::REF_PARAM, 1);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(ty);
+    return i.getDef();
   }
 
-  Operand &emitGlobalRef(GlobalDef &global) {
-    Instr *i = new Instr(Instr::REF_GLOBAL);
-    i->allocateOperands(1);
-    i->emplaceOperand<Operand::SSA_DEF_GLOBAL>(global);
-    emit(i);
-    return i->getDef();
+  Operand &emitOtherSSADefRef(OtherSSADef &def) {
+    Instr &i = emitInstr(Instr::REF_OTHERSSADEF, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
+    i.emplaceOperand<Operand::SSA_USE>(def.getDef());
+    return i.getDef();
   }
 
   Instr &emitAlloca(SSAType &eleType, unsigned numEle) {
-    Instr *i = new Instr(Instr::ALLOCA);
-    i->allocateOperands(3);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
-    i->emplaceOperand<Operand::TYPE>(&eleType);
-    i->emplaceOperand<Operand::IMM32>(numEle);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::ALLOCA, 3);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
+    i.emplaceOperand<Operand::TYPE>(&eleType);
+    i.emplaceOperand<Operand::IMM32>(numEle);
+    return i;
   }
 
   Instr &emitAlloca(SSAType &eleType, Operand &numEleOp) {
-    Instr *i = new Instr(Instr::ALLOCA);
-    i->allocateOperands(3);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
-    i->emplaceOperand<Operand::TYPE>(&eleType);
-    i->emplaceOperand<Operand::SSA_USE>(numEleOp);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::ALLOCA, 3);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
+    i.emplaceOperand<Operand::TYPE>(&eleType);
+    i.emplaceOperand<Operand::SSA_USE>(numEleOp);
+    return i;
   }
 
   Instr &emitLoad(SSAType &type, Operand &addr) {
     assert(addr.ssaDefType() == PtrSSAType::get());
-    Instr *i = new Instr(Instr::LOAD);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-    i->emplaceOperand<Operand::SSA_USE>(addr);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::LOAD, 2);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
+    i.emplaceOperand<Operand::SSA_USE>(addr);
+    return i;
   }
 
   Instr &emitStore(Operand &val, Operand &addr) {
     assert(val.getKind() == Operand::SSA_DEF_TYPE);
     assert(addr.ssaDefType() == PtrSSAType::get());
-    Instr *i = new Instr(Instr::STORE);
-    i->allocateOperands(2);
-    i->emplaceOperand<Operand::SSA_USE>(val);
-    i->emplaceOperand<Operand::SSA_USE>(addr);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::STORE, 2);
+    i.emplaceOperand<Operand::SSA_USE>(val);
+    i.emplaceOperand<Operand::SSA_USE>(addr);
+    return i;
   }
 
   Instr &emitCmp(BrCond cond, Operand &lhs, Operand &rhs) {
     assert(lhs.ssaDefType() == rhs.ssaDefType());
-    Instr *i = new Instr(Instr::CMP);
-    i->allocateOperands(4);
-    i->emplaceOperand<Operand::SSA_DEF_TYPE>(IntSSAType::get(1));
-    i->emplaceOperand<Operand::BRCOND>(cond);
-    i->emplaceOperand<Operand::SSA_USE>(lhs);
-    i->emplaceOperand<Operand::SSA_USE>(rhs);
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::CMP, 4);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(IntSSAType::get(1));
+    i.emplaceOperand<Operand::BRCOND>(cond);
+    i.emplaceOperand<Operand::SSA_USE>(lhs);
+    i.emplaceOperand<Operand::SSA_USE>(rhs);
+    return i;
   }
 
   Instr &emitBr(Block &dst) {
-    Instr *i = new Instr(Instr::BR);
-    i->allocateOperands(1);
-    i->emplaceOperand<Operand::SSA_USE>(dst.getDef());
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::BR, 1);
+    i.emplaceOperand<Operand::SSA_USE>(dst.getDef());
+    return i;
   }
 
   Instr &emitNot(Operand &val) {
@@ -324,13 +309,11 @@ public:
 
   Instr &emitBrCond(Operand &cond, Block &dstTrue, Block &dstFalse) {
     assert(cond.ssaDefType() == IntSSAType::get(1));
-    Instr *i = new Instr(Instr::BR_COND);
-    i->allocateOperands(3);
-    i->emplaceOperand<Operand::SSA_USE>(cond);
-    i->emplaceOperand<Operand::SSA_USE>(dstTrue.getDef());
-    i->emplaceOperand<Operand::SSA_USE>(dstFalse.getDef());
-    emit(i);
-    return *i;
+    Instr &i = emitInstr(Instr::BR_COND, 3);
+    i.emplaceOperand<Operand::SSA_USE>(cond);
+    i.emplaceOperand<Operand::SSA_USE>(dstTrue.getDef());
+    i.emplaceOperand<Operand::SSA_USE>(dstFalse.getDef());
+    return i;
   }
 
   Instr &emitAdd(Operand &lhs, Operand &rhs) {

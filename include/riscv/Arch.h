@@ -1,16 +1,24 @@
 #pragma once
 
+#include "ir/Alignment.h"
 #include "ir/Arch.h"
+#include "ir/FrameLayout.h"
 #include "ir/IR.h"
 #include "ir/IRPass.h"
 #include "ir/IRPatExecutor.h"
 #include "ir/IRVisitor.h"
 #include "ir/InstrBuilder.h"
+#include "ir/Operand.h"
+#include "support/Ranges.h"
+#include "support/Utility.h"
 #include <array>
 #include <cassert>
 #include <initializer_list>
 
 namespace riscv {
+
+constexpr unsigned XLEN = 32;
+constexpr unsigned XALIGNEXP = 2;
 
 #include "riscv/Arch.dsl.riscv.h"
 
@@ -32,9 +40,9 @@ class ABILoweringPass : public IRPass<Function> {
   const char *name() override { return "RiscVABILoweringPass"; }
 
   static constexpr auto inRegs =
-      std::to_array<Reg>({X10, X11, X12, X13, X14, X15, X16, X17});
-  static constexpr auto outRegs = std::to_array<Reg>({X10, X11});
-  static constexpr Reg raReg = X1;
+      std::to_array<Reg>({ALIAS_a0, ALIAS_a1, ALIAS_a2, ALIAS_a3, ALIAS_a4,
+                          ALIAS_a5, ALIAS_a6, ALIAS_a7});
+  static constexpr auto outRegs = std::to_array<Reg>({ALIAS_a0, ALIAS_a1});
 
   void run(Function &func, IRInfo<Function> &info) override {
     if (func.empty()) {
@@ -77,16 +85,18 @@ class ABILoweringPass : public IRPass<Function> {
         InstrBuilder ir(instr);
         if (instr.getKind() == Instr::RET) {
           size_t paramNum = 0;
+          Instr *i = func.createInstr(JALR, 3 + instr.getNumOperands());
+          i->emplaceOperand<Operand::REG_DEF>(X0);
+          i->emplaceOperand<Operand::REG_USE>(ALIAS_ra);
+          i->emplaceOperand<Operand::IMM32>(0);
           for (auto &op : instr) {
             assert(op.ssaUse().getDef().ssaDefType() == abiTy);
             assert(paramNum < outRegs.size());
             ir.emitCopy(outRegs[paramNum], op.ssaUse().getDef());
+            i->emplaceOperand<Operand::REG_USE>(outRegs[paramNum]);
+            i->getLastOperand().setImplicit(true);
             ++paramNum;
           }
-          Instr *i = func.createInstr(JALR, 3);
-          i->emplaceOperand<Operand::REG_DEF>(X0);
-          i->emplaceOperand<Operand::REG_USE>(raReg);
-          i->emplaceOperand<Operand::IMM32>(0);
           ir.emit(i);
           instr.deleteThis();
         } else if (instr.getKind() == Instr::CALL) {
@@ -118,18 +128,6 @@ class ABILoweringPass : public IRPass<Function> {
       }
     }
   }
-};
-
-class InstrSelect : public IRPatExecutor {
-  bool execute(Instr &instr) override;
-};
-
-class PreISelExpansion : public IRPatExecutor {
-  bool execute(Instr &instr) override;
-};
-
-class PreISelCombine : public IRPatExecutor {
-  bool execute(Instr &instr) override;
 };
 
 class PostRALowering : public IRPass<Function>,
@@ -185,11 +183,109 @@ public:
   const char *name() override { return "RiscVPostRALoweringPass"; }
 };
 
+class FrameLoweringPass : public IRPass<Function> {
+  const char *name() override { return "RiscVFrameLoweringPass"; }
+
+  std::vector<size_t> frameOffsets;
+  size_t frameSize;
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    calculateFrameOffsets(func.getFrameLayout());
+
+    InstrBuilder prologueIr(func.getEntry().getFirstSentry());
+    insertPrologue(prologueIr);
+
+    for (auto &block : func) {
+      for (auto &instr : block) {
+        if (instr.getKind() != JALR)
+          continue;
+        if (instr.getOperand(1).reg() != ALIAS_ra)
+          continue;
+        assert(instr.getOperand(0).reg() == X0);
+        assert(instr.getOperand(2).imm32() == 0);
+
+        InstrBuilder epilogueIr(instr);
+        insertEpilogue(epilogueIr);
+      }
+    }
+    materializeFrameRefs(func.getFrameLayout());
+  }
+
+  void insertPrologue(InstrBuilder &ir) {
+    Instr &i = ir.emitInstr(riscv::ADDI, 3);
+    i.emplaceOperand<Operand::REG_DEF>(ALIAS_sp);
+    i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
+    i.emplaceOperand<Operand::IMM32>(-frameSize);
+  }
+
+  void insertEpilogue(InstrBuilder &ir) {
+    Instr &i = ir.emitInstr(riscv::ADDI, 3);
+    i.emplaceOperand<Operand::REG_DEF>(ALIAS_sp);
+    i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
+    i.emplaceOperand<Operand::IMM32>(frameSize);
+  }
+
+  void calculateFrameOffsets(FrameLayout &frameLayout) {
+    frameSize = 0;
+    frameOffsets = std::vector<size_t>(frameLayout.getNumEntries());
+    for (auto &frameEntry : frameLayout.entryRange()) {
+      Alignment align = getAlignForTy(frameEntry.getElementType());
+      frameSize = align.alignSize(frameSize);
+      frameOffsets[frameEntry.getId()] = frameSize;
+      frameSize += frameEntry.getNumElements() * align.getSize();
+    }
+    frameSize = Alignment(4).alignSize(frameSize);
+  }
+
+  void materializeFrameRefs(FrameLayout &frameLayout) {
+    for (auto &frameEntry : frameLayout.entryRange()) {
+      for (auto &use : make_earlyincr_range(frameEntry.getDef().ssaDef())) {
+        Instr &instr = use.getParent();
+        size_t frameOffset = frameOffsets[frameEntry.getId()];
+        switch (instr.getKind()) {
+        case Instr::REF_OTHERSSADEF: {
+          Instr &i = InstrBuilder(instr).emitInstr(ADDI, 3);
+          i.emplaceOperand<Operand::REG_DEF>(instr.getOperand(0).reg());
+          i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
+          i.emplaceOperand<Operand::IMM32>(frameOffset);
+          instr.deleteThis();
+          break;
+        }
+        default:
+          UNREACHABLE("Illegal use of frame def");
+        }
+      }
+    }
+  }
+
+  Alignment getAlignForTy(SSAType &ty) {
+    switch (ty.getKind()) {
+    case SSAType::INT:
+      switch (as<IntSSAType>(ty).getBits()) {
+      case 8:
+        return Alignment(0);
+      case 16:
+        return Alignment(1);
+      case 32:
+        return Alignment(2);
+      }
+      break;
+    case SSAType::PTR:
+      return Alignment(XALIGNEXP);
+    default:
+      break;
+    }
+    UNREACHABLE("Illegal type");
+  }
+};
+
 class AsmPrinterPass : public IRPass<Program> {
 public:
-  AsmPrinterPass(std::ostream &out) : out(out) {}
+  AsmPrinterPass(std::ostream &out);
   const char *name() override { return "RiscVAsmPrinterPass"; }
   void run(Program &prog, IRInfo<Program> &info) override {
+    blockToNum.clear();
+
     out << ".option nopic\n";
     out << ".attribute arch, \"rv32i\"\n";
     out << ".text\n";
@@ -255,7 +351,7 @@ public:
       break;
     case Operand::SSA_DEF_TYPE:
     case Operand::SSA_DEF_BLOCK:
-    case Operand::SSA_DEF_GLOBAL:
+    case Operand::SSA_DEF_OTHER:
     case Operand::TYPE:
     case Operand::BLOCK:
     case Operand::BRCOND:
@@ -265,11 +361,11 @@ public:
     case Operand::SSA_USE: {
       Operand &def = op.ssaUse().getDef();
       if (def.getKind() == Operand::SSA_DEF_BLOCK) {
-        printBlockLabel(op.ssaUse().getDef().ssaDefBlock());
+        printBlockLabel(def.ssaDefBlock());
         break;
       }
-      if (def.getKind() == Operand::SSA_DEF_GLOBAL) {
-        out << op.ssaDefGlobal().getName();
+      if (def.getKind() == Operand::SSA_DEF_OTHER) {
+        printOtherSSADef(def.ssaDefOther());
         break;
       }
       assert(false && "Illegal operand");
@@ -289,6 +385,14 @@ public:
       out << op.imm32();
       break;
     }
+    }
+  }
+
+  void printOtherSSADef(OtherSSADef &def) {
+    if (def.isGlobal()) {
+      std::cout << def.global().getName();
+    } else {
+      assert(false && "Illegal operand");
     }
   }
 

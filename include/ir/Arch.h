@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ir/IR.h"
+#include "ir/Operand.h"
 #include <span>
 
 struct ArchReg {

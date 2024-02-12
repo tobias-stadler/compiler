@@ -1,3 +1,4 @@
+#include "riscv/PreISelCombine.h"
 #include "riscv/Arch.h"
 
 namespace {
@@ -9,7 +10,7 @@ namespace {
 namespace riscv {
 
 bool PreISelCombine::execute(Instr &instr) {
-  if (!dslExecutePat(instr)) {
+  if (!DslPatExecutor(observer).dslExecutePat(instr)) {
     return false;
   }
   instr.deleteThis();

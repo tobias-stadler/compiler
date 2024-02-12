@@ -1,8 +1,18 @@
+#include "riscv/PreISelExpansion.h"
 #include "riscv/Arch.h"
+#include <cassert>
 
 namespace {
 
+bool isConstant(Operand &op, int32_t val) {
+  Instr &instr = op.getParent();
+  return instr.getKind() == Instr::CONST_INT &&
+         instr.getOperand(1).imm32() == val;
+}
+
 #include "riscv/InstrSelector.dsl.preISelExpansion.h"
+
+IntSSAType &XTy = IntSSAType::get(riscv::XLEN);
 
 void legalizeSSAUse(Instr::Kind ext, Operand &op, IntSSAType &expectedTy,
                     InstrBuilder &ir) {
@@ -35,9 +45,9 @@ void legalizeSSADef(Operand &op, IntSSAType &expectedTy, InstrBuilder &ir) {
 void legalizeOperand(Instr::Kind ext, Operand &op, InstrBuilder &preIr,
                      InstrBuilder &postIr) {
   if (op.isSSADef()) {
-    legalizeSSADef(op, IntSSAType::get(32), postIr);
+    legalizeSSADef(op, XTy, postIr);
   } else if (op.isSSAUse()) {
-    legalizeSSAUse(ext, op, IntSSAType::get(32), preIr);
+    legalizeSSAUse(ext, op, XTy, preIr);
   }
 }
 void legalizeOperands(Instr::Kind ext, Instr &instr,
@@ -59,13 +69,69 @@ void legalizeAllOperands(Instr::Kind ext, Instr &instr) {
 
 void legalizePhi(PhiInstrPtr phi) {
   InstrBuilder postIr(phi->getNextNode());
-  legalizeSSADef(phi->getDef(), IntSSAType::get(32), postIr);
+  legalizeSSADef(phi->getDef(), XTy, postIr);
   for (int i = 0, iEnd = phi.getNumPredecessors(); i < iEnd; ++i) {
     InstrBuilder preIr(phi.getPredecessorBlock(i).getLast());
-    legalizeSSAUse(Instr::EXT_A, phi.getPredecessorUse(i), IntSSAType::get(32),
-                   preIr);
+    legalizeSSAUse(Instr::EXT_A, phi.getPredecessorUse(i), XTy, preIr);
   }
 }
+
+void legalizeCmp(Instr &instr) {
+  InstrBuilder preIr(instr);
+  InstrBuilder postIr(instr.getNextNode());
+  Instr::Kind ext =
+      instr.getOperand(1).brCond().isSigned() ? Instr::EXT_S : Instr::EXT_Z;
+  legalizeSSADef(instr.getOperand(0), XTy, postIr);
+  legalizeSSAUse(ext, instr.getOperand(2), XTy, preIr);
+  legalizeSSAUse(ext, instr.getOperand(3), XTy, preIr);
+}
+
+void commuteConstant(Instr &instr, Operand &op1, Operand &op2) {
+  Operand &op1Def = op1.ssaUse().getDef();
+  Operand &op2Def = op2.ssaUse().getDef();
+  if (op1Def.getParent().getKind() != Instr::CONST_INT) {
+    return;
+  }
+  if (op2Def.getParent().getKind() == Instr::CONST_INT) {
+    return;
+  }
+}
+
+void commuteOperands(Operand &op1, Operand &op2) {
+  Instr &instr = op1.getParent();
+  assert(&instr == &op2.getParent());
+  Operand &op1Def = op1.ssaUse().getDef();
+  Operand &op2Def = op2.ssaUse().getDef();
+  op1.emplace<Operand::SSA_USE>(&instr, op2Def);
+  op2.emplace<Operand::SSA_USE>(&instr, op1Def);
+}
+
+bool isNormalBrCond(BrCond cond) {
+  switch (cond.getKind()) {
+  case BrCond::LE:
+  case BrCond::LEU:
+  case BrCond::GT:
+  case BrCond::GTU:
+    return false;
+  default:
+    return true;
+  }
+}
+
+void normalizeCmp(Instr &instr) {
+  BrCond cond = instr.getOperand(1).brCond();
+
+  if (isNormalBrCond(cond))
+    return;
+
+  instr.getOperand(1).emplace<Operand::BRCOND>(&instr, cond.commute());
+  commuteOperands(instr.getOperand(2), instr.getOperand(3));
+}
+
+// TODO: Implement legalization differently
+// 1. Tag defs with needed legalizaion artifacts
+// 2. Walk all defs and intelligently insert artifacts
+
 } // namespace
 
 namespace riscv {
@@ -88,11 +154,14 @@ bool PreISelExpansion::execute(Instr &instr) {
     legalizeAllOperands(Instr::EXT_A, instr);
     break;
   case Instr::CMP:
-    legalizeOperands(Instr::EXT_Z, instr,
-                     {&instr.getOperand(2), &instr.getOperand(3)});
+    legalizeCmp(instr);
+    normalizeCmp(instr);
+    break;
+  case Instr::BR_COND:
+    legalizeOperands(Instr::EXT_Z, instr, {&instr.getOperand(0)});
     break;
   }
-  if (dslExecutePat(instr)) {
+  if (DslPatExecutor(observer).dslExecutePat(instr)) {
     instr.deleteThis();
   }
   return true;

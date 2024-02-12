@@ -142,8 +142,8 @@ bool Lexer::matchOrEmptyNext(Token::Kind kind) {
 
 Token Lexer::expectNext(Token::Kind kind) {
   if (tok.kind != kind)
-    error(std::string("Expected different token. Got: ")
-              .append(std::string_view(tok)));
+    error(std::format("Expected {} token. Got: {} {}", (int)kind, (int)tok.kind,
+                      tok.str));
 
   return next();
 }

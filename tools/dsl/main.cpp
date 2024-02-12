@@ -47,6 +47,11 @@ void genArch(RecordSpace &rs, CodeBuilder &code) {
         aliasRec ? std::format("\"{}\"", aliasRec->toString()) : "nullptr"));
   }
   code.endBlockSemicolon();
+  for (auto rec : regRecs) {
+    auto *aliasRec = dynamic_cast<TokenRecord *>(rec->getRecord("alias"));
+    code.println(std::format("constexpr auto ALIAS_{} = {};",
+                             aliasRec->toString(), rec->name));
+  }
   code.startFunction("constexpr const ArchReg* getArchReg(unsigned kind)");
   code.println("return kind > ARCH_REG_START && kind < ARCH_REG_END ? archRegs "
                "+ (kind - ARCH_REG_START - 1)"
@@ -110,6 +115,10 @@ void genArch(RecordSpace &rs, CodeBuilder &code) {
 }
 
 void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code) {
+  code.startBlock("class DslPatExecutor");
+  code.println("public:");
+  code.println("DslPatExecutor(IRObserver* observer = nullptr) {}");
+  code.println("IRObserver* observer;");
   std::vector<IRPatternRecord *> recs;
   rs.gatherRecursively(recs, "ir_pat");
   std::stable_sort(
@@ -160,6 +169,7 @@ void genIRPatExecutor(RecordSpace &rs, CodeBuilder &code) {
   code.endBlock();
   code.println("return false;");
   code.endBlock();
+  code.endBlockSemicolon();
 }
 
 int main(int argc, char *argv[]) {

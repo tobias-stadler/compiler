@@ -12,7 +12,7 @@ ir_pat {
     IN def(%arith,i32) %lhs %c;
   }
   if {
-    $TCInt::canTrunc<12>($ #imm $.imm32())$
+    $isLegalImm($ #imm $)$
   }
   emit {
     riscv::OUT def(%arith,i32) %lhs #imm;
@@ -24,7 +24,7 @@ ir_pat {
     IN def(%arith,i32) %c %lhs;
   }
   if {
-    $TCInt::canTrunc<12>($ #imm $.imm32())$
+    $isLegalImm($ #imm $)$
   }
   emit {
     riscv::OUT def(%arith,i32) %lhs #imm;
@@ -43,10 +43,25 @@ ir_pat {
 }
 }
 
+let ShiftImmPat = Template {
+ir_pat {
+  match {
+    CONST_INT def(%c,i32) #imm;
+    IN def(%arith,i32) %lhs %c;
+  }
+  if {
+    $isLegalImm($ #imm $)$
+  }
+  emit {
+    riscv::OUT def(%arith,i32) %lhs #imm;
+  }
+}
+}
+
 let CondBrPat = Template {
 ir_pat {
   match {
-    CMP def(%cmp,i1) IN %lhs %rhs;
+    CMP def(%cmp,i32) IN %lhs %rhs;
     BR_COND %cmp %b1 %b2;
   }
   emit {
@@ -57,7 +72,7 @@ ir_pat {
 let CondBrCommutePat = Template {
 ir_pat {
   match {
-    CMP def(%cmp,i1) IN %lhs %rhs;
+    CMP def(%cmp,i32) IN %lhs %rhs;
     BR_COND %cmp %b1 %b2;
   }
   emit {
@@ -69,11 +84,10 @@ ir_pat {
 let CmpPat = Template {
 ir_pat {
   match {
-    CMP def(%cmp,i1) IN;
-    EXT_Z def(%ext,i32) %cmp;
+    CMP def(%cmp,i32) IN;
   }
   emit {
-    riscv::OUT def(%ext,i32) %lhs %rhs;
+    riscv::OUT def(%cmp,i32) %lhs %rhs;
   }
 }
 }
@@ -81,14 +95,24 @@ let CmpImmPat = Template {
 ir_pat {
   match {
     CONST_INT def(%c,i32) #imm;
-    CMP def(%cmp,i1) IN;
-    EXT_Z def(%ext,i32) %cmp;
+    CMP def(%cmp,i32) IN;
   }
   if {
-    $TCInt::canTrunc<12>($ #imm $.imm32())$
+    $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%ext,i32) %lhs #imm;
+    riscv::OUT def(%cmp,i32) %lhs #imm;
+  }
+}
+}
+let CmpInvPat = Template {
+ir_pat {
+  match {
+    CMP def(%cmp,i32) IN;
+  }
+  emit {
+    riscv::OUT def(%set,i32) %lhs %rhs;
+    riscv::XORI def(%cmp,i32) %set imm32(1);
   }
 }
 }
@@ -102,7 +126,7 @@ ir_pat {
     %src $.ssaDefType() == IntSSAType::get($ TY $)$
   }
   emit {
-    riscv::OUT %src %addr;
+    riscv::OUT %src %addr imm32(0);
   }
 }
 }
@@ -141,7 +165,7 @@ ir_pat {
     LOAD def(%dst,i32) %addr;
   }
   emit {
-    riscv::LW def(%dst,i32) %addr;
+    riscv::LW def(%dst,i32) %addr imm32(0);
   }
 }
 ir_pat {
@@ -149,7 +173,7 @@ ir_pat {
     LOAD def(%dst,i16) %addr;
   }
   emit {
-    riscv::LH def(%ld,i32) %addr;
+    riscv::LH def(%ld,i32) %addr imm32(0);
     TRUNC def(%dst,i16) %ld;
   }
 }
@@ -158,7 +182,7 @@ ir_pat {
     LOAD def(%dst,i8) %addr;
   }
   emit {
-    riscv::LB def(%ld,i32) %addr;
+    riscv::LB def(%ld,i32) %addr imm32(0);
     TRUNC def(%dst,i8) %ld;
   }
 }
@@ -202,6 +226,16 @@ ir_pat {
     %a2 $.ssaDef().replaceAllUses($ %src $)$
   }
 }
+ir_pat {
+  match {
+    CMP def(%src,i32);
+    TRUNC def(%a1,i1) %src;
+    EXT_Z def(%a2,i32) %a1;
+  }
+  apply {
+    %a2 $.ssaDef().replaceAllUses($ %src $)$
+  }
+}
 }
 
 let isel = IRPatExecutor {
@@ -230,34 +264,19 @@ ir_pat {
     riscv::PSEUDO_LI def(%c,i32) #imm;
   }
 }
+
 ir_pat {
   match {
-    REF_GLOBAL def(%gaddr,ptr) %g;
+    REF_OTHERSSADEF def(%gaddr,ptr) %g;
+  }
+  if {
+    %g $.ssaDefOther().isGlobal()$
   }
   emit {
     riscv::PSEUDO_LA def(%gaddr,ptr) %g;
   }
 }
-ir_pat {
-  match {
-    CONST_INT def(%c,i32) imm32(0);
-    CMP def(%cmp,i1) eq %lhs %c;
-    EXT_Z def(%ext,i32) %cmp;
-  }
-  emit {
-    riscv::SLTIU def(%ext,i32) %lhs imm32(1);
-  }
-}
-ir_pat {
-  match {
-    CONST_INT def(%c,i32) imm32(0);
-    CMP def(%cmp,i1) eq %c %lhs;
-    EXT_Z def(%ext,i32) %cmp;
-  }
-  emit {
-    riscv::SLTIU def(%ext,i32) %lhs imm32(1);
-  }
-}
+
 ir_pat {
   match {
     BR %b;
@@ -299,6 +318,88 @@ ir_pat {
 !CmpImmPat {
   let IN = token {gtu %c %lhs}
   let OUT = token {SLTIU}
+}
+
+!CmpInvPat {
+  let IN = token {ge %lhs %rhs}
+  let OUT = token {SLT}
+}
+!CmpInvPat {
+  let IN = token {geu %lhs %rhs}
+  let OUT = token {SLTU}
+}
+
+!CmpInvPat {
+  let IN = token {le %rhs %lhs}
+  let OUT = token {SLT}
+}
+!CmpInvPat {
+  let IN = token {leu %rhs %lhs}
+  let OUT = token {SLT}
+}
+
+ir_pat {
+  match {
+    CONST_INT def(%c,i32) imm32(0);
+    CMP def(%cmp,i32) eq %lhs %c;
+  }
+  emit {
+    riscv::SLTIU def(%cmp,i32) %lhs imm32(1);
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c,i32) #imm;
+    CMP def(%cmp,i32) eq %lhs %c;
+  }
+  if {
+    $isLegalImmNegated($ #imm $)$
+  }
+  emit {
+    riscv::ADDI def(%sub,i32) %lhs imm32($-$#imm$.imm32()$);
+    riscv::SLTIU def(%cmp,i32) %sub imm32(1);
+  }
+}
+ir_pat {
+  match {
+    CMP def(%cmp,i32) eq %lhs %rhs;
+  }
+  emit {
+    riscv::SUB def(%sub,i32) %lhs %rhs;
+    riscv::SLTIU def(%cmp,i32) %sub imm32(1);
+  }
+}
+
+ir_pat {
+  match {
+    CONST_INT def(%c,i32) imm32(0);
+    CMP def(%cmp,i32) ne %lhs %c;
+  }
+  emit {
+    riscv::SLTU def(%cmp,i32) riscv::X0 %lhs;
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c,i32) #imm;
+    CMP def(%cmp,i32) ne %lhs %c;
+  }
+  if {
+    $isLegalImmNegated($ #imm $)$
+  }
+  emit {
+    riscv::ADDI def(%sub,i32) %lhs imm32($-$#imm$.imm32()$);
+    riscv::SLTU def(%cmp,i32) riscv::X0 %lhs;
+  }
+}
+ir_pat {
+  match {
+    CMP def(%cmp,i32) ne %lhs %rhs;
+  }
+  emit {
+    riscv::SUB def(%sub,i32) %lhs %rhs;
+    riscv::SLTU def(%cmp,i32) riscv::X0 %lhs;
+  }
 }
 
 !CondBrPat {
@@ -348,7 +449,7 @@ ir_pat {
     SUB def(%arith,i32) %lhs %c;
   }
   if {
-    #imm $.imm32() > INT32_MIN && TCInt::canTrunc<12>(-$ #imm $.imm32())$
+    $isLegalImmNegated($ #imm $)$
   }
   emit {
     riscv::ADDI def(%arith,i32) %lhs imm32($-$#imm$.imm32()$);
@@ -369,6 +470,18 @@ ir_pat {
 !ArithImmPat {
   let IN = token {XOR}
   let OUT = token {XORI}
+}
+!ShiftImmPat {
+  let IN = token {SL_L}
+  let OUT = token {SLLI}
+}
+!ShiftImmPat {
+  let IN = token {SR_L}
+  let OUT = token {SRLI}
+}
+!ShiftImmPat {
+  let IN = token {SR_A}
+  let OUT = token {SRAI}
 }
 
 !ArithPat {

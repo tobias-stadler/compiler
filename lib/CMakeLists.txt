@@ -24,6 +24,7 @@ c/IRGen.cpp
 c/ASTPrinter.cpp
 c/Semantics.cpp
 ir/IR.cpp
+ir/SSAType.cpp
 ir/IRPrinter.cpp
 ir/RegLiveness.cpp
 ir/RegTracking.cpp
@@ -32,6 +33,7 @@ ir/DominatorTree.cpp
 riscv/PreISelExpansion.cpp
 riscv/PreISelCombine.cpp
 riscv/InstrSelect.cpp
+riscv/AsmPrinter.cpp
 ${DSL_HDRS}
 )
 

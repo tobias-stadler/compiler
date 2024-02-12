@@ -18,6 +18,9 @@
 #include <ir/RegTracking.h>
 #include <memory>
 #include <riscv/Arch.h>
+#include <riscv/InstrSelect.h>
+#include <riscv/PreISelCombine.h>
+#include <riscv/PreISelExpansion.h>
 #include <string>
 
 int main(int argc, char *argv[]) {
@@ -72,6 +75,7 @@ int main(int argc, char *argv[]) {
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<InstrExpansionPass>(expansion));
     funcPipeline.addPass(std::make_unique<InstrCombinePass>(combine));
+    funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<InstrSelectPass>(isel));
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<PhiIsolationPass>());
@@ -84,6 +88,7 @@ int main(int argc, char *argv[]) {
     funcPipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
     funcPipeline.addPass(std::make_unique<RegAllocPass>());
     funcPipeline.addPass(std::make_unique<RegRewritePass>());
+    funcPipeline.addPass(std::make_unique<riscv::FrameLoweringPass>());
     funcPipeline.addPass(std::make_unique<riscv::PostRALowering>());
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
   }

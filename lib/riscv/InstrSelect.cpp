@@ -1,13 +1,21 @@
+#include "riscv/InstrSelect.h"
 #include "ir/IR.h"
 #include "riscv/Arch.h"
 #include "support/TCInt.h"
 
 namespace {
 
-constexpr unsigned XLEN = 32;
-
 unsigned selectExtShiftBits(Operand &op) {
-  return XLEN - static_cast<IntSSAType &>(op.ssaDefType()).getBits();
+  return riscv::XLEN - static_cast<IntSSAType &>(op.ssaDefType()).getBits();
+}
+
+bool isLegalImm(Operand &op) {
+  int32_t imm = op.imm32();
+  return TCInt::canTrunc<12>(imm);
+}
+bool isLegalImmNegated(Operand &op) {
+  int32_t imm = op.imm32();
+  return imm > INT32_MIN && TCInt::canTrunc<12>(-imm);
 }
 
 #include "riscv/InstrSelector.dsl.isel.h"
@@ -17,11 +25,18 @@ unsigned selectExtShiftBits(Operand &op) {
 namespace riscv {
 
 bool InstrSelect::execute(Instr &instr) {
-  if (!dslExecutePat(instr)) {
-    return false;
+  if (DslPatExecutor(&observer).dslExecutePat(instr)) {
+    instr.deleteThis();
+    for (auto *op : observer.observed) {
+      DslPatExecutor(&observer).dslExecutePat(instr);
+    }
+    return true;
   }
-  instr.deleteThis();
-  return true;
+  assert(observer.observed.empty());
+  if (instr.getKind() == Instr::REF_OTHERSSADEF)
+    return true;
+
+  return false;
 }
 
 } // namespace riscv

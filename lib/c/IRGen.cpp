@@ -88,7 +88,9 @@ public:
   void allocateStack(StorageInfo &s) {
     assert(s.kind == EMPTY);
     SSAType &ssaType = irType(s.symbol->getType()->getKind());
-    Operand &ptr = ir->emitAlloca(ssaType, 1).getDef();
+    Operand &ptr = ir->emitOtherSSADefRef(
+        currFunc->getFrameLayout().createFrameEntry(ssaType, 1));
+
     s.kind = STACK;
     s.ptr = &ptr;
   }

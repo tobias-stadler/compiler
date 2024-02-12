@@ -1,21 +1,6 @@
+#include "ir/IR.h"
 #include <cassert>
-#include <ir/IR.h>
-#include <map>
 #include <utility>
-
-namespace {
-std::map<unsigned, IntSSAType> otherIntTypes;
-} // namespace
-
-VoidSSAType VoidSSAType::instance;
-PtrSSAType PtrSSAType::instance;
-
-IntSSAType &IntSSAType::get(unsigned bits) {
-  assert(bits > 0);
-  auto [it, succ] =
-      otherIntTypes.insert(std::make_pair(bits, IntSSAType(bits)));
-  return it->second;
-}
 
 void SSADef::unlinkAllUses() {
   for (Operand *use = chNext; use;) {

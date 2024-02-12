@@ -40,7 +40,7 @@ public:
   }
 
   P &getParent() {
-    assert(isLinked());
+    assert(parent);
     return *static_cast<P *>(parent);
   }
 
@@ -68,7 +68,7 @@ public:
   }
 
   void insertPrev(N *o) {
-    assert(o && prev && parent);
+    assert(o && !o->isLinked() && prev && parent);
     o->parent = parent;
     o->next = this;
     o->prev = prev;
@@ -128,7 +128,7 @@ public:
     using pointer = value_type *;
     using reference = value_type &;
 
-    iterator() {}
+    iterator() = default;
     iterator(IntrusiveListNode<N, P> &ref) : mPtr(&ref) {}
 
     reference operator*() const { return static_cast<reference>(*mPtr); }
@@ -167,6 +167,8 @@ public:
   private:
     IntrusiveListNode<N, P> *mPtr = nullptr;
   };
+
+  static_assert(std::bidirectional_iterator<iterator>);
 
   iterator begin() { return iterator(*sentryBegin.next); }
   iterator end() { return iterator(sentryEnd); }

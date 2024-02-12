@@ -247,7 +247,12 @@ void IRPatternRecord::genEmit(InstrPats &pats, CodeBuilder &code) {
       case OperandPat::COND_GT:
       case OperandPat::COND_GTU:
       case OperandPat::COND_GE:
-      case OperandPat::COND_GEU:
+      case OperandPat::COND_GEU: {
+        code.println(std::format(
+            "e_instr_{}->emplaceOperand<Operand::BRCOND>(BrCond::{}());",
+            instrNum, OperandPat::kindName(op.kind)));
+        break;
+      }
       case OperandPat::RECIDENT_DEF:
         error("Unsupported operand pattern in emit");
         break;
