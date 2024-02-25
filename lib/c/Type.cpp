@@ -2,6 +2,7 @@
 #include "support/RefCount.h"
 #include <cassert>
 
+namespace c {
 namespace {
 auto initBasicTypes(bool c) {
   std::array<BasicType, Type::NUM_BASIC> arr;
@@ -47,3 +48,8 @@ bool operator==(const Type &a, const Type &b) {
 
   return false;
 }
+
+CountedPtr<Type> Type::ptrType() {
+  return make_counted<PtrType>(make_counted_from_this());
+}
+} // namespace c

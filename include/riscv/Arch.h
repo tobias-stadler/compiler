@@ -188,6 +188,7 @@ class FrameLoweringPass : public IRPass<Function> {
 
   std::vector<size_t> frameOffsets;
   size_t frameSize;
+  Alignment frameAlign;
 
   void run(Function &func, IRInfo<Function> &info) override {
     calculateFrameOffsets(func.getFrameLayout());
@@ -227,14 +228,16 @@ class FrameLoweringPass : public IRPass<Function> {
 
   void calculateFrameOffsets(FrameLayout &frameLayout) {
     frameSize = 0;
+    frameAlign = Alignment(4);
     frameOffsets = std::vector<size_t>(frameLayout.getNumEntries());
     for (auto &frameEntry : frameLayout.entryRange()) {
-      Alignment align = getAlignForTy(frameEntry.getElementType());
+      Alignment align = frameEntry.getAlign();
+      frameAlign = Alignment(std::max(frameAlign.getExp(), align.getExp()));
       frameSize = align.alignSize(frameSize);
       frameOffsets[frameEntry.getId()] = frameSize;
-      frameSize += frameEntry.getNumElements() * align.getSize();
+      frameSize += frameEntry.getSize();
     }
-    frameSize = Alignment(4).alignSize(frameSize);
+    frameSize = frameAlign.alignSize(frameSize);
   }
 
   void materializeFrameRefs(FrameLayout &frameLayout) {
@@ -256,26 +259,6 @@ class FrameLoweringPass : public IRPass<Function> {
         }
       }
     }
-  }
-
-  Alignment getAlignForTy(SSAType &ty) {
-    switch (ty.getKind()) {
-    case SSAType::INT:
-      switch (as<IntSSAType>(ty).getBits()) {
-      case 8:
-        return Alignment(0);
-      case 16:
-        return Alignment(1);
-      case 32:
-        return Alignment(2);
-      }
-      break;
-    case SSAType::PTR:
-      return Alignment(XALIGNEXP);
-    default:
-      break;
-    }
-    UNREACHABLE("Illegal type");
   }
 };
 

@@ -1,18 +1,22 @@
 #pragma once
 #include "ir/IR.h"
+#include "support/RTTI.h"
 #include "support/RefCount.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-class Type : public IntrusiveCountedPtrBase {
+namespace c {
+
+class Type : public CountedPtrBase, public CountedPtrFromThis<Type> {
 public:
   enum Kind {
     EMPTY,
@@ -93,6 +97,8 @@ public:
 
   friend bool operator!=(const Type &a, const Type &b) { return !(a == b); }
 
+  CountedPtr<Type> ptrType();
+
 protected:
   Type(Kind kind, Qualifier qualifier) : kind(kind), qualifier(qualifier) {}
   Qualifier qualifier;
@@ -107,6 +113,8 @@ protected:
       : Type(kind, qualifier), baseType(baseType) {}
 
 public:
+  static bool is_impl(const Type &o) { return isDerived(o.getKind()); }
+
   CountedPtr<Type> &getBaseType() { return baseType; }
 
   void setBaseType(CountedPtr<Type> newBase) { baseType = std::move(newBase); }
@@ -135,6 +143,8 @@ private:
 
 class BasicType : public Type {
 public:
+  static bool is_impl(const Type &o) { return isBasic(o.getKind()); }
+
   BasicType(Kind kind = VOID, Qualifier qualifier = Qualifier());
   static CountedPtr<BasicType> create(Kind kind,
                                       Qualifier qualifier = Qualifier());
@@ -146,6 +156,8 @@ public:
 
 class PtrType : public DerivedType {
 public:
+  static bool is_impl(const Type &o) { return o.getKind() == PTR; }
+
   PtrType(CountedPtr<Type> baseType = nullptr,
           Qualifier qualifier = Qualifier())
       : DerivedType(PTR, std::move(baseType), qualifier) {}
@@ -153,11 +165,15 @@ public:
 
 class ArrType : public DerivedType {
 public:
+  static bool is_impl(const Type &o) { return o.getKind() == ARR; }
+
   ArrType() : DerivedType(ARR, nullptr, Qualifier()) {}
 };
 
 class FuncType : public DerivedType {
 public:
+  static bool is_impl(const Type &o) { return o.getKind() == FUNC; }
+
   FuncType() : DerivedType(FUNC, nullptr, Qualifier()) {}
 
   CountedPtr<Type> &getParamType(size_t i) { return params[i].second; }
@@ -197,16 +213,24 @@ private:
 
 class StructType : public Type {
 public:
+  static bool is_impl(const Type &o) {
+    return o.getKind() == STRUCT || o.getKind() == UNION;
+  }
+
   StructType(bool isUnion, std::string_view name)
       : Type(isUnion ? UNION : STRUCT, Qualifier()), name(name) {}
 
-  Type *getNamedMemberType(std::string_view name) {
+  bool isUnion() const { return getKind() == UNION; }
+
+  std::ptrdiff_t getNamedMemberIdx(std::string_view name) {
     auto it = memberIndex.find(name);
     if (it == memberIndex.end()) {
-      return nullptr;
+      return -1;
     }
-    return members[it->second].get();
+    return it->second;
   }
+
+  Type &getMemberType(size_t idx) { return *members[idx]; }
 
   void addMember(CountedPtr<Type> type) {
     members.emplace_back(std::move(type));
@@ -229,3 +253,5 @@ private:
   std::string_view name;
   std::unordered_map<std::string_view, size_t> memberIndex;
 };
+
+} // namespace c

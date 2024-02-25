@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ir/Alignment.h"
 #include "ir/Operand.h"
 #include <memory>
 #include <ranges>
@@ -13,28 +14,25 @@ public:
     return o.getKind() == LOCAL_FRAME;
   }
 
-  FrameDef(int32_t id, SSAType &elementType, size_t numElements)
-      : OtherSSADef(LOCAL_FRAME), id(id), elementType(elementType),
-        numElements(numElements) {}
+  FrameDef(int32_t id, size_t size, Alignment align)
+      : OtherSSADef(LOCAL_FRAME), id(id), size(size), align(align) {}
 
   int32_t getId() const { return id; }
 
-  SSAType &getElementType() const { return elementType; }
+  size_t getSize() { return size; }
 
-  bool isSingle() const { return numElements == 1; }
-
-  size_t getNumElements() const { return numElements; }
+  Alignment getAlign() { return align; }
 
 private:
   int32_t id;
-  SSAType &elementType;
-  size_t numElements;
+  size_t size;
+  Alignment align;
 };
 
 class FrameLayout {
 public:
-  FrameDef &createFrameEntry(SSAType &ty, size_t numElements) {
-    auto newEntry = std::make_unique<FrameDef>(entries.size(), ty, numElements);
+  FrameDef &createFrameEntry(size_t size, Alignment align) {
+    auto newEntry = std::make_unique<FrameDef>(entries.size(), size, align);
     FrameDef *entry = newEntry.get();
     entries.push_back(std::move(newEntry));
     return *entry;

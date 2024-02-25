@@ -69,6 +69,10 @@ public:
     if (instr.isPhi() || instr.isTarget() || instr.isCopy()) {
       return;
     }
+    if (isDead(instr)) {
+      instr.deleteThis();
+      return;
+    }
     if (exec->execute(instr)) [[likely]] {
       return;
     }

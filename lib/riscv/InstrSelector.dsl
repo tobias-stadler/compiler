@@ -69,17 +69,6 @@ ir_pat {
   }
 }
 }
-let CondBrCommutePat = Template {
-ir_pat {
-  match {
-    CMP def(%cmp,i32) IN %lhs %rhs;
-    BR_COND %cmp %b1 %b2;
-  }
-  emit {
-    riscv::OUT %rhs %lhs %b1 %b2;
-  }
-}
-}
 
 let CmpPat = Template {
 ir_pat {
@@ -98,6 +87,8 @@ ir_pat {
     CMP def(%cmp,i32) IN;
   }
   if {
+    #imm $.imm32() != 0$
+    $&&$
     $isLegalImm($ #imm $)$
   }
   emit {
@@ -105,7 +96,7 @@ ir_pat {
   }
 }
 }
-let CmpInvPat = Template {
+let CmpNegPat = Template {
 ir_pat {
   match {
     CMP def(%cmp,i32) IN;
@@ -116,17 +107,20 @@ ir_pat {
   }
 }
 }
-
-let StorePat = Template {
+let CmpNegImmPat = Template {
 ir_pat {
   match {
-    STORE %src %addr;
+    CONST_INT def(%c,i32) #imm;
+    CMP def(%cmp,i32) IN;
   }
   if {
-    %src $.ssaDefType() == IntSSAType::get($ TY $)$
+    #imm $.imm32() != 0$
+    $&&$
+    $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT %src %addr imm32(0);
+    riscv::OUT def(%set,i32) %lhs #imm;
+    riscv::XORI def(%cmp,i32) %set imm32(1);
   }
 }
 }
@@ -302,40 +296,21 @@ ir_pat {
   let IN = token {ltu %lhs %c}
   let OUT = token {SLTIU}
 }
-
-!CmpPat {
-  let IN = token {gt %rhs %lhs}
-  let OUT = token {SLT}
-}
-!CmpImmPat {
-  let IN = token {gt %c %lhs}
-  let OUT = token {SLTI}
-}
-!CmpPat {
-  let IN = token {gtu %rhs %lhs}
-  let OUT = token {SLTU}
-}
-!CmpImmPat {
-  let IN = token {gtu %c %lhs}
-  let OUT = token {SLTIU}
-}
-
-!CmpInvPat {
+!CmpNegPat {
   let IN = token {ge %lhs %rhs}
   let OUT = token {SLT}
 }
-!CmpInvPat {
+!CmpNegImmPat {
+  let IN = token {ge %lhs %c}
+  let OUT = token {SLTI}
+}
+!CmpNegPat {
   let IN = token {geu %lhs %rhs}
   let OUT = token {SLTU}
 }
-
-!CmpInvPat {
-  let IN = token {le %rhs %lhs}
-  let OUT = token {SLT}
-}
-!CmpInvPat {
-  let IN = token {leu %rhs %lhs}
-  let OUT = token {SLT}
+!CmpNegImmPat {
+  let IN = token {geu %lhs %c}
+  let OUT = token {SLTIU}
 }
 
 ir_pat {
@@ -416,22 +391,6 @@ ir_pat {
 }
 !CondBrPat {
   let IN = token {ltu}
-  let OUT = token {BLTU}
-}
-!CondBrCommutePat {
-  let IN = token {le}
-  let OUT = token {BGE}
-}
-!CondBrCommutePat {
-  let IN = token {leu}
-  let OUT = token {BGEU}
-}
-!CondBrCommutePat {
-  let IN = token {gt}
-  let OUT = token {BLT}
-}
-!CondBrCommutePat {
-  let IN = token {gtu}
   let OUT = token {BLTU}
 }
 !CondBrPat {
@@ -517,17 +476,34 @@ ir_pat {
   let OUT = token {SRA}
 }
 
-!StorePat {
-  let TY = token {32}
-  let OUT = token {SW}
+ir_pat {
+  match {
+    STORE %src %addr;
+  }
+  if {
+    %src $.ssaDefType() == IntSSAType::get(32)$
+  }
+  emit {
+    riscv::SW %src %addr imm32(0);
+  }
 }
-!StorePat {
-  let TY = token {16}
-  let OUT = token {SH}
+ir_pat {
+  match {
+    TRUNC def(%tr,i16) %src;
+    STORE %tr %addr;
+  }
+  emit {
+    riscv::SH %src %addr imm32(0);
+  }
 }
-!StorePat {
-  let TY = token {8}
-  let OUT = token {SB}
+ir_pat {
+  match {
+    TRUNC def(%tr,i8) %src;
+    STORE %tr %addr;
+  }
+  emit {
+    riscv::SB %src %addr imm32(0);
+  }
 }
 
 }

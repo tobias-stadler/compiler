@@ -25,14 +25,10 @@ bool isLegalImmNegated(Operand &op) {
 namespace riscv {
 
 bool InstrSelect::execute(Instr &instr) {
-  if (DslPatExecutor(&observer).dslExecutePat(instr)) {
+  if (DslPatExecutor(observer).dslExecutePat(instr)) {
     instr.deleteThis();
-    for (auto *op : observer.observed) {
-      DslPatExecutor(&observer).dslExecutePat(instr);
-    }
     return true;
   }
-  assert(observer.observed.empty());
   if (instr.getKind() == Instr::REF_OTHERSSADEF)
     return true;
 

@@ -1,6 +1,7 @@
 #include "c/IRGen.h"
 #include "c/AST.h"
 #include "c/ASTVisitor.h"
+#include "c/MemoryLayout.h"
 #include "c/Semantics.h"
 #include "c/Symbol.h"
 #include "c/Type.h"
@@ -9,6 +10,7 @@
 #include "ir/InstrBuilder.h"
 #include "ir/LazySSABuilder.h"
 #include "support/RefCount.h"
+#include "support/Utility.h"
 #include <cassert>
 #include <cstdlib>
 #include <memory>
@@ -85,31 +87,14 @@ public:
     return it->second;
   }
 
-  void allocateStack(StorageInfo &s) {
-    assert(s.kind == EMPTY);
-    SSAType &ssaType = irType(s.symbol->getType()->getKind());
-    Operand &ptr = ir->emitOtherSSADefRef(
-        currFunc->getFrameLayout().createFrameEntry(ssaType, 1));
-
-    s.kind = STACK;
-    s.ptr = &ptr;
-  }
-
-  void allocateSSA(StorageInfo &s) {
-    assert(s.kind == EMPTY);
-    s.kind = SSA;
-    s.ptr = nullptr;
-  }
-
-  void setFunction(Function &func) {
-    slots.clear();
-    currFunc = &func;
-  }
+  void clear() { slots.clear(); }
 
   void trackSSADef(StorageInfo &s, Operand &operand) {
     assert(s.kind == SSA);
     s.ssaDefs.push_back(&operand);
   }
+
+  StorageInfo &get(Symbol &symbol) { return get(symbol.getId()); }
 
   StorageInfo &get(SSASymbolId id) {
     auto it = slots.find(id);
@@ -118,7 +103,6 @@ public:
   }
 
 private:
-  Function *currFunc;
   IRBuilder &ir;
   std::unordered_map<SSASymbolId, StorageInfo> slots;
 };
@@ -150,7 +134,7 @@ public:
     funcAST = &ast;
 
     ir.createAndSetFunction(std::string(ast.decl.ident));
-    storage.setFunction(ir.getFunc());
+    storage.clear();
     ir.createAndSetBlock();
     SSABuilder::sealBlock(ir.getBlock());
     sym.pushScope(ast.funcScope);
@@ -166,7 +150,7 @@ public:
       auto *s = sym.getSymbol(ident);
       assert(s);
       auto &sInfo = storage.declareLocal(*s);
-      storage.allocateSSA(sInfo);
+      allocateSSA(sInfo);
 
       tmpSymbol = sInfo.symbol;
       tmpOperand = nullptr;
@@ -192,10 +176,12 @@ public:
             std::make_unique<StaticMemory>());
       } else if (sym.scope().isBlock()) {
         auto &sInfo = storage.declareLocal(*s);
-        if (s->isAddrTaken()) {
-          storage.allocateStack(sInfo);
+        auto tyKind = s->getType()->getKind();
+        if ((Type::isInteger(tyKind) || tyKind == Type::PTR) &&
+            !s->isAddrTaken()) {
+          allocateSSA(sInfo);
         } else {
-          storage.allocateSSA(sInfo);
+          allocateStack(sInfo);
         }
         if (initializer) {
           dispatch(*initializer);
@@ -210,6 +196,23 @@ public:
         }
       }
     }
+  }
+
+  void allocateStack(StorageBuilder::StorageInfo &s) {
+    assert(s.kind == StorageBuilder::EMPTY);
+    auto [size, align] = mem.getSizeAndAlignment(*s.symbol->getType());
+
+    Operand &ptr = ir->emitOtherSSADefRef(
+        ir.getFunc().getFrameLayout().createFrameEntry(size, align));
+
+    s.kind = StorageBuilder::STACK;
+    s.ptr = &ptr;
+  }
+
+  void allocateSSA(StorageBuilder::StorageInfo &s) {
+    assert(s.kind == StorageBuilder::EMPTY);
+    s.kind = StorageBuilder::SSA;
+    s.ptr = nullptr;
   }
 
   void visitCompoundSt(CompoundStAST &ast) {
@@ -241,13 +244,19 @@ public:
     switch (ast.getKind()) {
     case AST::ADDR: {
       dispatch(ast.getSubExpression());
-      sema.addr();
-      tmpOperand = storage.get(tmpSymbol->getId()).ptr;
+      sema.expectLValue();
+      loadAddr();
+      assert(tmpOperand);
+      sema.setCategory(ExpressionSemantics::RVALUE);
+      sema.ptrType();
       break;
     }
     case AST::DEREF: {
       dispatch(ast.getSubExpression());
-      sema.deref();
+      sema.expectRValueImplicitConv();
+      sema.expectTypeKindImplicitConv(Type::PTR);
+      sema.setCategory(ExpressionSemantics::LVALUE_MEM);
+      sema.baseType();
       break;
     }
     case AST::LOG_NOT: {
@@ -257,7 +266,7 @@ public:
     }
     case AST::BIT_NOT: {
       dispatch(ast.getSubExpression());
-      sema.promoteInt();
+      sema.expectPromotedInt();
       ir->emitNot(*tmpOperand);
       tmpOperand = &ir.getDef();
       break;
@@ -275,6 +284,31 @@ public:
       assert(false && "unsupported");
       break;
     }
+  }
+
+  void visitMemberAccess(MemberAccessAST &ast) {
+    dispatch(*ast.child);
+    sema.expectLValue();
+    loadAddr();
+    assert(tmpOperand);
+    auto &structTy = as<StructType>(*sema.getType());
+    auto idx = structTy.getNamedMemberIdx(ast.ident);
+    if (idx < 0) {
+      error("Invalid member ident");
+    }
+    assert(ast.getKind() == AST::ACCESS_MEMBER);
+    size_t offset = 0;
+    if (!structTy.isUnion()) {
+      offset = mem.getStructLayout(structTy).offsets[idx];
+    }
+    if (offset) {
+      ir->emitConstInt(tmpOperand->ssaDefType(), offset);
+      ir->emitAdd(*tmpOperand, ir.getDef());
+      tmpOperand = &ir.getDef();
+    }
+
+    sema.setType(structTy.getMemberType(idx).make_counted_from_this());
+    sema.setCategory(ExpressionSemantics::LVALUE_MEM);
   }
 
   void visitBinop(BinopAST &ast) {
@@ -333,11 +367,11 @@ public:
     case AST::LSHIFT:
     case AST::RSHIFT: {
       dispatch(ast.getRHS());
-      sema.promoteInt();
+      sema.expectPromotedInt();
       auto rhs = saveExprState();
 
       dispatch(ast.getLHS());
-      sema.promoteInt();
+      sema.expectPromotedInt();
       if (rhs.tmpOperand->ssaDefType() != tmpOperand->ssaDefType()) {
         ir->emitExtOrTrunc(Instr::EXT_Z, tmpOperand->ssaDefType(),
                            *rhs.tmpOperand);
@@ -376,7 +410,7 @@ public:
 
   Operand *genUsualArithUnop(UnopAST &ast) {
     dispatch(ast.getSubExpression());
-    sema.promoteInt();
+    sema.expectPromotedInt();
     return tmpOperand;
   }
 
@@ -492,49 +526,56 @@ public:
     exit(1);
   }
 
-  void store(Operand &operand) {
+  void loadAddr() {
+    assert(sema.isLValue());
     if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
-      assert(!tmpOperand);
-      tmpOperand = nullptr;
-      // TODO: check automatic
-      auto &s = storage.get(tmpSymbol->getId());
+      assert(!tmpOperand && tmpSymbol);
+      auto &s = storage.get(*tmpSymbol);
+      tmpOperand = s.ptr;
       if (s.kind == StorageBuilder::SSA) {
-        SSABuilder::store(tmpSymbol->getId(), operand, ir.getBlock());
-        storage.trackSSADef(s, *tmpOperand);
+        assert(!tmpOperand);
         return;
-      } else if (s.kind == StorageBuilder::STACK) {
-        tmpOperand = s.ptr;
       }
     }
+    // Do nothing for LVALUE_MEM, because pointer is already in tmpOperand
+    assert(tmpOperand);
+  }
 
-    if (sema.getCategory() == ExpressionSemantics::LVALUE_MEM || tmpOperand) {
-      ir->emitStore(operand, *tmpOperand);
+  void store(Operand &operand) {
+    loadAddr();
+    if (!tmpOperand) {
+      assert(sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL &&
+             tmpSymbol);
+      auto &s = storage.get(*tmpSymbol);
+      assert(s.kind == StorageBuilder::SSA);
+      SSABuilder::store(tmpSymbol->getId(), operand, ir.getBlock());
+      storage.trackSSADef(s, *tmpOperand);
+      tmpOperand = nullptr;
       return;
     }
-    error("Invalid value category for LHS of store");
+    ir->emitStore(operand, *tmpOperand);
+    tmpOperand = nullptr;
+  }
+
+  void load() {
+    loadAddr();
+    if (!tmpOperand) {
+      assert(sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL &&
+             tmpSymbol);
+      auto &s = storage.get(*tmpSymbol);
+      assert(s.kind == StorageBuilder::SSA);
+      tmpOperand = SSABuilder::load(tmpSymbol->getId(),
+                                    irType(sema.getTypeKind()), ir.getBlock());
+      assert(tmpOperand);
+      return;
+    }
+    ir->emitLoad(irType(sema.getTypeKind()), *tmpOperand);
+    tmpOperand = &ir.getDef();
   }
 
   ExpressionSemantics::Result semanticConvLValue() {
-    if (sema.getCategory() == ExpressionSemantics::LVALUE_SYMBOL) {
-      assert(!tmpOperand);
-      tmpOperand = nullptr;
-      // TODO: check automatic
-      auto &s = storage.get(tmpSymbol->getId());
-      if (s.kind == StorageBuilder::SSA) {
-        tmpOperand = SSABuilder::load(
-            tmpSymbol->getId(), irType(sema.getTypeKind()), ir.getBlock());
-        assert(tmpOperand);
-        return ExpressionSemantics::SUCCESS;
-      } else if (s.kind == StorageBuilder::STACK) {
-        tmpOperand = s.ptr;
-      }
-    }
-    if (sema.getCategory() == ExpressionSemantics::LVALUE_MEM || tmpOperand) {
-      ir->emitLoad(irType(sema.getTypeKind()), *tmpOperand);
-      tmpOperand = &ir.getDef();
-      return ExpressionSemantics::SUCCESS;
-    }
-    return ExpressionSemantics::ERROR;
+    load();
+    return ExpressionSemantics::SUCCESS;
   }
 
   ExpressionSemantics::Result semanticConvBool() {
@@ -575,6 +616,7 @@ public:
   IRBuilder ir;
   StorageBuilder storage;
   SymbolTable sym;
+  MemoryLayout mem;
 };
 } // namespace
 

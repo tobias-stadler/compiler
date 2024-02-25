@@ -1,8 +1,6 @@
 static int global_x;
 
-int do_sth(int a, int b) {
-  return a + b;
-}
+int do_sth(int a, int b) { return a + b; }
 
 int main() {
   int x, y, z;
@@ -12,5 +10,13 @@ int main() {
   y = 2;
   z = x + y + 5;
   *p = do_sth(x, y);
+
+  struct goofy {
+    char x;
+    int y;
+  } s;
+
+  s.x = 69;
+  s.y = 42;
   return 0;
 }

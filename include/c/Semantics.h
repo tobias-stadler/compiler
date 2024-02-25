@@ -125,26 +125,17 @@ public:
     type = std::move(ty);
   }
 
-  void deref() {
-    expectRValueImplicitConv();
-    expectTypeKindImplicitConv(Type::PTR);
-    category = LVALUE_MEM;
-    type = static_cast<PtrType *>(type.get())->getBaseType();
-  }
+  void baseType() { type = as<DerivedType>(*type).getBaseType(); }
 
-  void addr() {
-    expectLValue();
-    category = RVALUE;
-    type = make_counted<PtrType>(std::move(type));
-  }
+  void ptrType() { type = type->ptrType(); }
 
-  void promoteInt() {
+  void expectPromotedInt() {
     expectRValueImplicitConv();
     expectTypeKindImplicitConv(intPromotion(type->getKind()));
   }
 
   void setCategory(Category c) { category = c; }
-  void setType(CountedPtr<Type> ty) { type = std::move(ty); }
+  void setType(CountedPtr<Type> &&ty) { type = std::move(ty); }
 
   bool isLValue() {
     return category == LVALUE_SYMBOL || category == LVALUE_MEM;

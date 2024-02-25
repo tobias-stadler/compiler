@@ -4,7 +4,7 @@
 #include <memory>
 #include <utility>
 
-class IntrusiveCountedPtrBase {
+class CountedPtrBase {
 public:
   std::size_t getRefCount() { return refCount; }
 
@@ -91,6 +91,18 @@ public:
 
 private:
   T *mPtr = nullptr;
+};
+
+template <typename T> class CountedPtrFromThis {
+public:
+  CountedPtr<T> make_counted_from_this() {
+    assert(impl().getRefCount() > 0 &&
+           "statically allocated couted types need a dummy reference");
+    return CountedPtr<T>(&impl());
+  }
+
+private:
+  T &impl() { return static_cast<T &>(*this); }
 };
 
 template <typename T, typename... ARGS>

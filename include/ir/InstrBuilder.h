@@ -110,7 +110,7 @@ public:
 
   Instr &emitConstInt(SSAType &type, int32_t val) {
     // TODO: assert that type can construct constant
-    assert(type.getKind() == SSAType::INT);
+    assert(type.getKind() == SSAType::INT || type.getKind() == SSAType::PTR);
     Instr &i = emitInstr(Instr::CONST_INT, 2);
     i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::IMM32>(val);
