@@ -80,20 +80,20 @@ private:
 };
 
 class Block : public IntrusiveList<Instr, Block>,
-              public IntrusiveListNode<Block, Function> {
+              public IntrusiveListNode<Block, Function>,
+              public OtherSSADef {
 public:
-  Block() { blockDef.emplace<Operand::SSA_DEF_BLOCK>(nullptr, *this); }
+  static bool is_impl(const OtherSSADef &o) {
+    return o.getKind() == LOCAL_BLOCK;
+  }
 
-  Operand &getDef() { return blockDef; }
+  Block() : OtherSSADef(LOCAL_BLOCK) {}
 
-  unsigned getNumPredecessors() { return blockDef.ssaDef().getNumUses(); }
+  unsigned getNumPredecessors() { return getDef().ssaDef().getNumUses(); }
 
   IntrusiveListNode<Instr, Block> &getFirstNonPhiSentry();
 
   void *userData = nullptr;
-
-private:
-  Operand blockDef;
 };
 
 class Instr : public IntrusiveListNode<Instr, Block> {

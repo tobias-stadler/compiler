@@ -180,10 +180,6 @@ class SSADef {
 public:
   SSADef(SSAType &type) : contentType(&type) {}
   SSADef(SSAType *type) : contentType(type) {}
-  SSADef(Block &block) : contentBlock(&block) {}
-  SSADef(Block *block) : contentBlock(block) {}
-  SSADef(OtherSSADef &other) : contentOther(&other) {}
-  SSADef(OtherSSADef *other) : contentOther(other) {}
 
   SSADef(const SSADef &o) = delete;
   SSADef &operator=(const SSADef &o) = delete;
@@ -238,11 +234,7 @@ public:
 
 private:
   Operand *chNext = nullptr;
-  union {
-    SSAType *contentType;
-    Block *contentBlock;
-    OtherSSADef *contentOther;
-  };
+  SSAType *contentType;
 };
 
 class OperandChain {
@@ -274,7 +266,6 @@ public:
   enum Kind {
     EMPTY,
     SSA_DEF_TYPE,
-    SSA_DEF_BLOCK,
     SSA_DEF_OTHER,
     SSA_USE,
     REG_DEF,
@@ -288,7 +279,6 @@ public:
   static constexpr bool kindIsSSADef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
-    case SSA_DEF_BLOCK:
     case SSA_DEF_OTHER:
       return true;
     default:
@@ -305,7 +295,6 @@ public:
   static constexpr bool kindIsDef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
-    case SSA_DEF_BLOCK:
     case SSA_DEF_OTHER:
     case REG_DEF:
       return true;
@@ -324,7 +313,6 @@ public:
     case EMPTY:
       break;
     case SSA_DEF_TYPE:
-    case SSA_DEF_BLOCK:
     case SSA_DEF_OTHER:
       assert(false && "Cannot copy SSA operand");
       break;
@@ -372,7 +360,6 @@ public:
       contentReg.~Reg();
       break;
     case SSA_DEF_TYPE:
-    case SSA_DEF_BLOCK:
     case SSA_DEF_OTHER:
       contentDef.~SSADef();
       break;
@@ -441,14 +428,11 @@ public:
     ssaDef().contentType = &type;
   }
 
-  Block &ssaDefBlock() {
-    assert(kind == SSA_DEF_BLOCK);
-    return *ssaDef().contentBlock;
-  }
+  Block &ssaDefBlock() { return as<Block>(ssaDefOther()); }
 
   OtherSSADef &ssaDefOther() {
     assert(kind == SSA_DEF_OTHER);
-    return *ssaDef().contentOther;
+    return reinterpret_cast<OtherSSADef &>(*this);
   }
 
   void ssaDefReplace(Reg reg) {
@@ -568,13 +552,18 @@ public:
     GLOBAL_STATIC_MEMORY,
     GLOBAL_END,
     LOCAL_START,
+    LOCAL_BLOCK,
     LOCAL_PARAM,
     LOCAL_FRAME,
+    LOCAL_MEMORY_ACCESS,
     LOCAL_END
   };
 
   OtherSSADef(Kind kind) : kind(kind) {
-    def.emplace<Operand::SSA_DEF_OTHER>(nullptr, this);
+    def.emplace<Operand::SSA_DEF_OTHER>(nullptr, nullptr);
+  }
+  OtherSSADef(Kind kind, SSAType &type) : kind(kind) {
+    def.emplace<Operand::SSA_DEF_OTHER>(nullptr, type);
   }
 
   Kind getKind() const { return kind; }
@@ -595,10 +584,15 @@ public:
 
   GlobalDef &global() { return as<GlobalDef>(*this); }
 
+  Block &block() { return as<Block>(*this); }
+
 private:
-  Operand def;
+  Operand def; // This needs to be the first member, so that Operand*
+               // can be directly converted to OtherSSADef*
   Kind kind;
 };
+
+static_assert(std::is_standard_layout_v<OtherSSADef>);
 
 inline SSADef::iterator &SSADef::iterator::operator++() {
   assert(mPtr);

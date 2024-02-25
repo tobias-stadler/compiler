@@ -333,7 +333,6 @@ public:
     case Operand::EMPTY:
       break;
     case Operand::SSA_DEF_TYPE:
-    case Operand::SSA_DEF_BLOCK:
     case Operand::SSA_DEF_OTHER:
     case Operand::TYPE:
     case Operand::BLOCK:
@@ -343,10 +342,6 @@ public:
       break;
     case Operand::SSA_USE: {
       Operand &def = op.ssaUse().getDef();
-      if (def.getKind() == Operand::SSA_DEF_BLOCK) {
-        printBlockLabel(def.ssaDefBlock());
-        break;
-      }
       if (def.getKind() == Operand::SSA_DEF_OTHER) {
         printOtherSSADef(def.ssaDefOther());
         break;
@@ -374,6 +369,8 @@ public:
   void printOtherSSADef(OtherSSADef &def) {
     if (def.isGlobal()) {
       std::cout << def.global().getName();
+    } else if (is<Block>(def)) {
+      printBlockLabel(def.block());
     } else {
       assert(false && "Illegal operand");
     }

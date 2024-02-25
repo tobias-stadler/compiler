@@ -1,6 +1,7 @@
 #include "ir/IRPrinter.h"
 #include "ir/IR.h"
 #include "ir/IRVisitor.h"
+#include "support/Utility.h"
 #include <cassert>
 #include <iostream>
 #include <map>
@@ -20,9 +21,6 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
       break;
     case Operand::SSA_DEF_TYPE:
       std::cout << "unnamed def";
-      break;
-    case Operand::SSA_DEF_BLOCK:
-      std::cout << "unnamed block";
       break;
     case Operand::SSA_DEF_OTHER: {
       OtherSSADef &def = op.ssaDefOther();
@@ -122,9 +120,6 @@ void PrintIRVisitor::visitOperand(Operand &op) {
   case Operand::SSA_USE:
     printNumberedDef(op.ssaUse().getDef());
     break;
-  case Operand::SSA_DEF_BLOCK:
-    std::cout << "unnamed";
-    break;
   case Operand::REG_USE:
     printReg(op.reg());
     break;
@@ -156,6 +151,8 @@ void PrintIRVisitor::visitOperand(Operand &op) {
   case Operand::BRCOND:
     std::cout << BrCond::kindName(op.brCond().getKind());
     break;
+  default:
+    UNREACHABLE("Illegal operand kind");
   }
 }
 
