@@ -6,7 +6,6 @@ std::map<unsigned, IntSSAType> otherIntTypes;
 } // namespace
 
 VoidSSAType VoidSSAType::instance;
-PtrSSAType PtrSSAType::instance;
 
 IntSSAType &IntSSAType::get(unsigned bits) {
   assert(bits > 0);

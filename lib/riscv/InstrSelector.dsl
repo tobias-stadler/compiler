@@ -261,13 +261,13 @@ ir_pat {
 
 ir_pat {
   match {
-    REF_OTHERSSADEF def(%gaddr,ptr) %g;
+    REF_OTHERSSADEF def(%gaddr,i32) %g;
   }
   if {
     %g $.ssaDefOther().isGlobal()$
   }
   emit {
-    riscv::PSEUDO_LA def(%gaddr,ptr) %g;
+    riscv::PSEUDO_LA def(%gaddr,i32) %g;
   }
 }
 

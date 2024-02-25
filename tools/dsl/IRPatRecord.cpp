@@ -81,9 +81,6 @@ IRPatternRecord::genType(RecordIdent &type) {
     error("Invalid type ident");
   }
   std::string_view tyStr = type.idents.back();
-  if (tyStr == "ptr") {
-    return {"SSA_DEF_TYPE", "PtrSSAType::get()"};
-  }
   static std::regex intRE("i([0-9]+)");
   std::cmatch m;
   if (std::regex_match(tyStr.begin(), tyStr.end(), m, intRE)) {

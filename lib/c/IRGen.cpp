@@ -35,9 +35,8 @@ SSAType &irType(Type::Kind kind) {
     return IntSSAType::get(16);
   case Type::SINT:
   case Type::UINT:
-    return IntSSAType::get(32);
   case Type::PTR:
-    return PtrSSAType::get();
+    return IntSSAType::get(32);
   default:
     assert(false && "Unsupported type for direct IR conversion");
     __builtin_unreachable();
@@ -203,6 +202,7 @@ public:
     auto [size, align] = mem.getSizeAndAlignment(*s.symbol->getType());
 
     Operand &ptr = ir->emitOtherSSADefRef(
+        irType(Type::PTR),
         ir.getFunc().getFrameLayout().createFrameEntry(size, align));
 
     s.kind = StorageBuilder::STACK;

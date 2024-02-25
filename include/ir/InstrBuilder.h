@@ -109,8 +109,7 @@ public:
   }
 
   Instr &emitConstInt(SSAType &type, int32_t val) {
-    // TODO: assert that type can construct constant
-    assert(type.getKind() == SSAType::INT || type.getKind() == SSAType::PTR);
+    assert(type.getKind() == SSAType::INT);
     Instr &i = emitInstr(Instr::CONST_INT, 2);
     i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::IMM32>(val);
@@ -240,31 +239,14 @@ public:
     return i.getDef();
   }
 
-  Operand &emitOtherSSADefRef(OtherSSADef &def) {
+  Operand &emitOtherSSADefRef(SSAType& type, OtherSSADef &def) {
     Instr &i = emitInstr(Instr::REF_OTHERSSADEF, 2);
-    i.emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::SSA_USE>(def.getDef());
     return i.getDef();
   }
 
-  Instr &emitAlloca(SSAType &eleType, unsigned numEle) {
-    Instr &i = emitInstr(Instr::ALLOCA, 3);
-    i.emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
-    i.emplaceOperand<Operand::TYPE>(&eleType);
-    i.emplaceOperand<Operand::IMM32>(numEle);
-    return i;
-  }
-
-  Instr &emitAlloca(SSAType &eleType, Operand &numEleOp) {
-    Instr &i = emitInstr(Instr::ALLOCA, 3);
-    i.emplaceOperand<Operand::SSA_DEF_TYPE>(PtrSSAType::get());
-    i.emplaceOperand<Operand::TYPE>(&eleType);
-    i.emplaceOperand<Operand::SSA_USE>(numEleOp);
-    return i;
-  }
-
   Instr &emitLoad(SSAType &type, Operand &addr) {
-    assert(addr.ssaDefType() == PtrSSAType::get());
     Instr &i = emitInstr(Instr::LOAD, 2);
     i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::SSA_USE>(addr);
@@ -272,8 +254,6 @@ public:
   }
 
   Instr &emitStore(Operand &val, Operand &addr) {
-    assert(val.getKind() == Operand::SSA_DEF_TYPE);
-    assert(addr.ssaDefType() == PtrSSAType::get());
     Instr &i = emitInstr(Instr::STORE, 2);
     i.emplaceOperand<Operand::SSA_USE>(val);
     i.emplaceOperand<Operand::SSA_USE>(addr);

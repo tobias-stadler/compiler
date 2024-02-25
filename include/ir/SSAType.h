@@ -58,12 +58,3 @@ private:
   IntSSAType(unsigned bits) : SSAType(INT), bits(bits) {}
   unsigned bits;
 };
-
-class PtrSSAType : public SSAType {
-public:
-  static PtrSSAType &get() { return instance; }
-
-private:
-  PtrSSAType() : SSAType(PTR) {}
-  static PtrSSAType instance;
-};
