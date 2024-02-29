@@ -39,6 +39,8 @@ public:
     }
     case Type::PTR:
       return {4, Alignment(2)};
+    case Type::QUALIFIED:
+      return getSizeAndAlignment(as<QualifiedType>(type).getBaseType());
     default:
       UNREACHABLE("Invalid type");
       break;

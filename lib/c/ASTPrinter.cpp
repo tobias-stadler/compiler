@@ -110,7 +110,7 @@ public:
 
   void visitDeclarator(DeclaratorAST &ast) {
     std::cout << ast.ident << " is ";
-    printType(ast.type.get());
+    printType(ast.type);
   }
 
   void visitDeclaration(DeclarationAST &ast) {
@@ -168,18 +168,18 @@ public:
     }
   }
 
-  void printQualifier(const Type::Qualifier &quali) {
+  void printQualifier(const QualifiedType::Qualifier &quali) {
     if (quali.isConst()) {
-      std::cout << " const";
+      std::cout << "const ";
     }
     if (quali.isRestrict()) {
-      std::cout << " restrict";
+      std::cout << " restrict ";
     }
     if (quali.isVolatile()) {
-      std::cout << " volatile";
+      std::cout << " volatile ";
     }
     if (quali.isAtomic()) {
-      std::cout << " atomic";
+      std::cout << "atomic ";
     }
   }
 
@@ -194,7 +194,7 @@ public:
       break;
     case Type::PTR:
       std::cout << "pointer to ";
-      printType(static_cast<DerivedType *>(type)->getBaseType().get());
+      printType(&as<DerivedType>(*type).getBaseType());
       break;
     case Type::FUNC: {
       std::cout << "function(";
@@ -205,11 +205,13 @@ public:
           std::cout << ", ";
         }
         first = false;
-        printType(t.get());
-        std::cout << " " << ident;
+        printType(t);
+        if (!ident.empty()) {
+          std::cout << " " << ident;
+        }
       }
       std::cout << ") returning ";
-      printType(p->getBaseType().get());
+      printType(&p->getBaseType());
       break;
     }
     case Type::VOID:
@@ -249,8 +251,14 @@ public:
       std::cout << "array";
       break;
     case Type::STRUCT:
-      printStructType(static_cast<StructType &>(*type));
+      printStructType(as<StructType>(*type));
       break;
+    case Type::QUALIFIED: {
+      auto &qTy = as<QualifiedType>(*type);
+      printQualifier(qTy.getQualifier());
+      printType(&qTy.getBaseType());
+      break;
+    }
     default:
       std::cout << "unnamed";
       break;
@@ -266,7 +274,7 @@ public:
     std::cout << "struct {";
     for (auto &subType : type.members) {
       std::cout << "\n";
-      printType(subType.get());
+      printType(subType);
       std::cout << ";";
     }
     std::cout << "\n";

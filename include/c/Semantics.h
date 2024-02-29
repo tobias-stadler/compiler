@@ -1,5 +1,6 @@
 #pragma once
 
+#include "c/AST.h"
 #include "c/Symbol.h"
 #include "c/Type.h"
 #include "ir/IR.h"
@@ -100,34 +101,40 @@ public:
   }
 
   class Handler {
-  public:
+    friend class ExpressionSemantics;
+
+  protected:
     virtual Result semanticConvLValue() = 0;
     virtual Result semanticConvBool() = 0;
     virtual Result semanticConvInt(Type::Kind expectedKind) = 0;
     virtual void semanticError(Result error) = 0;
+
+    Handler(ASTContext &ctx) : ctx(ctx) {}
+
+    ASTContext &ctx;
   };
 
   ExpressionSemantics(Handler &handler) : handler(&handler) {}
 
   Category getCategory() { return category; }
 
-  CountedPtr<Type> &getType() { return type; }
+  Type &getType() { return *type; }
 
   Type::Kind getTypeKind() { return type->getKind(); }
 
   void fromSymbol(Symbol &sym) {
     category = LVALUE_SYMBOL;
-    type = sym.getType();
+    type = &sym.getType();
   }
 
-  void fromType(CountedPtr<Type> ty) {
+  void fromType(Type &ty) {
     category = RVALUE;
-    type = std::move(ty);
+    type = &ty;
   }
 
-  void baseType() { type = as<DerivedType>(*type).getBaseType(); }
+  void baseType() { type = &as<DerivedType>(*type).getBaseType(); }
 
-  void ptrType() { type = type->ptrType(); }
+  void ptrType() { type = &handler->ctx.make_type<PtrType>(type); }
 
   void expectPromotedInt() {
     expectRValueImplicitConv();
@@ -135,7 +142,7 @@ public:
   }
 
   void setCategory(Category c) { category = c; }
-  void setType(CountedPtr<Type> &&ty) { type = std::move(ty); }
+  void setType(Type &ty) { type = &ty; }
 
   bool isLValue() {
     return category == LVALUE_SYMBOL || category == LVALUE_MEM;
@@ -173,13 +180,13 @@ public:
     if (expectedKind == Type::BOOL) {
       if (Type::isInteger(type->getKind()) &&
           handler->semanticConvBool() == SUCCESS) {
-        type = BasicType::create(Type::BOOL);
+        type = &handler->ctx.make_type<BasicType>(Type::BOOL);
         return true;
       }
     } else if (Type::isInteger(expectedKind) &&
                Type::isInteger(type->getKind())) {
       if (handler->semanticConvInt(expectedKind) == SUCCESS) {
-        type = BasicType::create(expectedKind);
+        type = &handler->ctx.make_type<BasicType>(expectedKind);
         return true;
       }
     }
@@ -217,7 +224,7 @@ public:
   }
 
 private:
-  CountedPtr<Type> type;
+  Type *type;
   Category category;
   Handler *handler;
 };

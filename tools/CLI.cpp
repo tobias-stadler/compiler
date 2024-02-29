@@ -41,8 +41,9 @@ int main(int argc, char *argv[]) {
   f.read(str.data(), sz);
 
   c::Lexer lex(str);
+  c::ASTContext ctx;
   c::SymbolTable sym;
-  c::Parser p(lex, sym);
+  c::Parser p(ctx, lex, sym);
 
   auto ast = p.parseTranslationUnit();
   if (!ast || lex.peekTokenKind() != c::Token::END) {
@@ -52,7 +53,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Parsing finished\n";
   PrintAST(**ast);
 
-  auto prog = IRGenAST(**ast, sym);
+  auto prog = IRGenAST(**ast, ctx, sym);
 
   riscv::Arch arch;
   IRPipeline<Program> progPipeline(&arch);
@@ -69,7 +70,7 @@ int main(int argc, char *argv[]) {
   funcPipeline.addPass(std::make_unique<PrintIRPass>());
   // pipeline.addPass(std::make_unique<PrintIRPass>());
   // pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
-  bool doCodegen = true;
+  bool doCodegen = false;
   if (doCodegen) {
     funcPipeline.addPass(std::make_unique<riscv::ABILoweringPass>());
     funcPipeline.addPass(std::make_unique<PrintIRPass>());

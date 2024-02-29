@@ -8,10 +8,38 @@
 #include <iostream>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace c {
+
+class ASTContext {
+public:
+  template <typename T, typename... Args> T &make_type(Args... args) {
+    static_assert(!std::is_same_v<BasicType, T>);
+    auto *t = new T(std::forward<Args>(args)...);
+    types.emplace_back(t);
+    return *t;
+  }
+
+  template <std::same_as<BasicType> T> BasicType &make_type(Type::Kind kind) {
+    assert(Type::isBasic(kind) && "Expected basic kind");
+    int idx = kind - Type::BASIC_START - 1;
+    return basicTypes[idx];
+  }
+
+  Type &qualifyType(Type &ty, QualifiedType::Qualifier qualifer) {
+    if (qualifer.none())
+      return ty;
+    return make_type<QualifiedType>(&ty, qualifer);
+  }
+
+private:
+  std::array<BasicType, Type::NUM_BASIC> basicTypes = BasicType::createAll();
+
+  std::vector<std::unique_ptr<Type>> types;
+};
 
 class AST {
 public:
@@ -317,13 +345,12 @@ class DeclaratorAST : public AST {
 public:
   DeclaratorAST() : AST(DECLARATOR) {}
 
-  DeclaratorAST(CountedPtr<DerivedType> type)
-      : AST(DECLARATOR), typeBase(type.get()), type(std::move(type)) {}
+  DeclaratorAST(DerivedType *type)
+      : AST(DECLARATOR), typeBase(type), type(type) {}
 
-  DeclaratorAST(CountedPtr<Type> type, DerivedType *typeBase,
+  DeclaratorAST(Type *type, DerivedType *typeBase,
                 std::string_view ident = std::string_view())
-      : AST(DECLARATOR), typeBase(typeBase), type(std::move(type)),
-        ident(ident) {}
+      : AST(DECLARATOR), typeBase(typeBase), type(type), ident(ident) {}
 
   void spliceEnd(DeclaratorAST o) {
     assert(canSplice() && "Expected spliceable DeclaratorAST");
@@ -331,17 +358,17 @@ public:
       ident = o.ident;
     }
     if (type) {
-      typeBase->setBaseType(std::move(o.type));
+      typeBase->setBaseType(o.type);
     } else {
-      type = std::move(o.type);
+      type = o.type;
     }
     typeBase = o.typeBase;
   }
 
   bool canSplice() { return bool(type) == bool(typeBase); }
 
-  DerivedType *typeBase;
-  CountedPtr<Type> type;
+  DerivedType *typeBase = nullptr;
+  Type *type = nullptr;
   std::string_view ident;
 };
 
@@ -369,7 +396,7 @@ public:
   CompoundStAST &getStatement() {
     return *static_cast<CompoundStAST *>(st.get());
   }
-  FuncType &getType() { return *static_cast<FuncType *>(decl.type.get()); }
+  FuncType &getType() { return *static_cast<FuncType *>(decl.type); }
 };
 
 class TranslationUnitAST : public AST {

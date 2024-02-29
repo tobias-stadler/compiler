@@ -586,6 +586,9 @@ public:
 
   Block &block() { return as<Block>(*this); }
 
+protected:
+  ~OtherSSADef() = default;
+
 private:
   Operand def; // This needs to be the first member, so that Operand*
                // can be directly converted to OtherSSADef*

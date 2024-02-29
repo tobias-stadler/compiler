@@ -137,37 +137,7 @@ public:
 
   static constexpr int NUM_KEYWORDS = KEYWORD_END - KEYWORD_START - 1;
 
-  static constexpr const char *kindName(Kind kind) {
-    switch (kind) {
-    case EMPTY:
-      return "Empty";
-    case INVALID:
-      return "Invalid";
-    case END:
-      return "EOF";
-    case SPACE:
-      return "Space";
-    case COMMENT:
-      return "Comment";
-    case IDENTIFIER:
-      return "Ident";
-    case LITERAL_NUM:
-      return "Num";
-    case LITERAL_CHAR:
-      return "Char";
-    case LITERAL_STR:
-      return "Str";
-    default:
-      break;
-    }
-    if (isPunctuator(kind)) {
-      return "Punct";
-    }
-    if (isKeyword(kind)) {
-      return "Keyword";
-    }
-    return "Unnamed";
-  }
+  static const char *kindName(Kind kind);
 
   static consteval Token::Kind charKind(unsigned char c) {
     if (isNum(c)) {

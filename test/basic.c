@@ -18,6 +18,8 @@ int main() {
   z = x + y + 5;
   *p = do_sth(x, y);
 
+  struct goofy *(*gf)(int);
+
   struct goofy s;
   s.x = 69;
   s.y = 42;

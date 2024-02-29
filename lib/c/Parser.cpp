@@ -437,28 +437,33 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
       P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
       return decl;
     } else {
-      auto func = make_counted<FuncType>();
+      P_ERR_CTX(ErrCtx::FUNC_PARAMS);
+      auto *func = &ctx.make_type<FuncType>();
       if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
         do {
           auto spec = parseDeclSpec(true, true, false);
           P_AST_EXPECT(spec, "declaration specifiers");
-          auto decl = parseDeclarator(false);
-          P_AST_EXPECT(decl, "declarator");
-          decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
-          func->addNamedParam(decl->ident, std::move(decl->type));
+          // TODO: correct handling of abstract declarators
+          auto decl = parseDeclarator(true);
+          P_AST_EXPECT_OR_NOP(decl);
+          if (decl) {
+            decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
+            if (decl->ident.empty()) {
+              func->addParam(*decl->type);
+            } else {
+              func->addNamedParam(decl->ident, *decl->type);
+            }
+          } else {
+            func->addParam(*spec->type);
+          }
         } while (lex->matchNextToken(Token::PUNCT_COMMA));
       }
       P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
-      return DeclaratorAST(std::move(func));
+      return DeclaratorAST(func);
     }
   }
   case Token::IDENTIFIER: {
-    if (abstract) {
-      return nop();
-    } else {
-      return DeclaratorAST(nullptr, nullptr,
-                           std::string_view(lex->nextToken()));
-    }
+    return DeclaratorAST(nullptr, nullptr, std::string_view(lex->nextToken()));
   }
   default:
     return nop();
@@ -489,16 +494,16 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
   switch (lex->peekTokenKind()) {
   case Token::PUNCT_STAR: {
     lex->dropToken();
-    auto quali = Type::Qualifier();
+    DerivedType *ty = &ctx.make_type<PtrType>(nullptr);
     auto spec = parseDeclSpec(false, true, false);
     P_AST_EXPECT_OR_NOP(spec);
     if (spec) {
-      quali = spec->qualifier;
+      ty = &ctx.make_type<QualifiedType>(ty, spec->qualifier);
     }
 
     auto decl = parseDeclarator(abstract);
     P_AST_EXPECT(decl, "declarator after pointer-declarator");
-    decl->spliceEnd(DeclaratorAST(make_counted<PtrType>(nullptr, quali)));
+    decl->spliceEnd(DeclaratorAST(ty));
     return decl;
   }
   default:
@@ -662,7 +667,7 @@ bool Parser::nextIsDeclarationList() {
   }
 }
 
-ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
+ASTResult<Type *> Parser::parseStruct() {
   P_ERR_CTX(ErrCtx::STRUCT);
   bool isUnion = false;
   bool isStruct = false;
@@ -682,11 +687,11 @@ ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
   }
   lex->dropToken();
   std::string_view name;
-  CountedPtr<StructType> res;
+  StructType *res;
   if (lex->matchPeekToken(Token::IDENTIFIER)) {
     name = lex->nextToken();
     if (auto *s = sym->getSymbol(name, Symbol::Namespace::TAG)) {
-      res = CountedPtr{as<StructType>(s->getType().get())};
+      res = as<StructType>(&s->getType());
       if (!((isUnion && res->getKind() == Type::UNION) ||
             (isStruct && res->getKind() == Type::STRUCT) ||
             isEnum && res->getKind() == Type::ENUM)) {
@@ -695,7 +700,7 @@ ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
     }
   }
   if (!res) {
-    res = make_counted<StructType>(isUnion);
+    res = &ctx.make_type<StructType>(isUnion);
     if (!name.empty()) {
       sym->declareSymbol(
           Symbol(Symbol::TYPEDEF, res, name, Symbol::Namespace::TAG));
@@ -721,7 +726,7 @@ ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
       auto decl = parseDeclarator(false);
       P_AST_EXPECT(decl, "declarator");
       decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
-      res->addNamedMember(decl->ident, std::move(decl->type));
+      res->addNamedMember(decl->ident, *decl->type);
     } while (lex->matchNextToken(Token::PUNCT_COMMA));
     P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
   }
@@ -729,18 +734,6 @@ ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
   res->setComplete(true);
   P_TOK_EXPECT_NEXT(Token::PUNCT_CURLYC);
   return res;
-}
-
-ASTResult<CountedPtr<EnumType>> Parser::parseEnum() {
-  P_ERR_CTX(ErrCtx::ENUM);
-  if (!lex->matchNextToken(Token::KEYWORD_ENUM)) {
-    return nop();
-  }
-  std::string_view name;
-  if (lex->matchPeekToken(Token::IDENTIFIER)) {
-    name = lex->nextToken();
-  }
-  return error("unimplemented");
 }
 
 ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
@@ -798,9 +791,8 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
                                           bool enableStorageSpec) {
   P_ERR_CTX(ErrCtx::DECL_SPEC);
   bool isNop = true;
-  Type::Qualifier qualifier = Type::Qualifier();
   Symbol::Kind storageKind = Symbol::EMPTY;
-  CountedPtr<StructType> structType;
+  Type *ty = nullptr;
   std::vector<Token::Kind> typeSpecs;
   int qConst = 0;
   int qVolatile = 0;
@@ -828,13 +820,26 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
       }
     case Token::KEYWORD_STRUCT:
     case Token::KEYWORD_UNION:
+    case Token::KEYWORD_ENUM:
       if (enableTypeSpec) {
-        if (structType) {
-          return error("Specified multiple struct types");
+        if (ty) {
+          return error("Specified multiple types");
         }
         auto tyRes = parseStruct();
-        P_AST_EXPECT(tyRes, "struct/union");
-        structType = tyRes.moveRes();
+        P_AST_EXPECT(tyRes, "struct/union/enum");
+        ty = *tyRes;
+        break;
+      } else {
+        goto done;
+      }
+    case Token::IDENTIFIER:
+      if (enableTypeSpec && !ty) {
+        auto *s = sym->getSymbol(lex->peekToken(), Symbol::Namespace::ORDINARY);
+        if (!s || s->getKind() != Symbol::TYPEDEF) {
+          goto done;
+        }
+        lex->dropToken();
+        ty = &s->getType();
         break;
       } else {
         goto done;
@@ -873,6 +878,7 @@ done:
   if (isNop) {
     return nop();
   }
+
   if (enableStorageSpec) {
     if (storageSpecs.size() == 0) {
       storageKind = Symbol::EMPTY;
@@ -900,27 +906,30 @@ done:
       return error("Multiple storage specifiers not allowed");
     }
   }
-  if (enableTypeQuali) {
-    qualifier = Type::Qualifier(qConst, qVolatile, qRestrict);
-  }
-  CountedPtr<Type> type = nullptr;
+
   if (enableTypeSpec) {
-    if (structType) {
+    if (ty) {
       if (typeSpecs.size() != 0) {
         return error("Specified type and type specifier");
       }
-      structType->setQualifier(qualifier);
-      type = std::move(structType);
     } else {
       std::sort(typeSpecs.begin(), typeSpecs.end());
       auto it = typeSpecSets.find(typeSpecs);
       if (it == typeSpecSets.end()) {
         return error("Invalid type specifier set");
       }
-      type = BasicType::create(it->second, qualifier);
+      ty = &ctx.make_type<BasicType>(it->second);
     }
   }
-  return DeclSpec(storageKind, std::move(type), qualifier);
+
+  QualifiedType::Qualifier qualifier = QualifiedType::Qualifier();
+  if (enableTypeQuali) {
+    qualifier = QualifiedType::Qualifier(qConst, qVolatile, qRestrict);
+    if (ty) {
+      ty = &ctx.qualifyType(*ty, qualifier);
+    }
+  }
+  return DeclSpec(storageKind, ty, qualifier);
 }
 
 void Parser::printErrCtx(std::ostream &os) {
@@ -929,8 +938,8 @@ void Parser::printErrCtx(std::ostream &os) {
   }
 }
 
-const char *Parser::errCtxMsg(ErrCtx ctx) {
-  switch (ctx) {
+const char *Parser::errCtxMsg(ErrCtx errCtx) {
+  switch (errCtx) {
   case ErrCtx::EXPRESSION:
     return "expression";
   case ErrCtx::DECLARATOR:
@@ -951,6 +960,10 @@ const char *Parser::errCtxMsg(ErrCtx ctx) {
     return "while loop";
   case ErrCtx::ST_EXPRESSION:
     return "expression statement";
+  case ErrCtx::ENUM:
+    return "enum";
+  case ErrCtx::FUNC_PARAMS:
+    return "function parameters";
   }
   return "unknown";
 }
@@ -962,8 +975,8 @@ ASTError Parser::errorExpectedToken(Token::Kind expectedKind, Token tok) {
     tok = lex->peekToken();
   }
 
-  std::cerr << "[Error][Parser] Expected " << Token::kindName(expectedKind)
-            << " token, but got " << tok << '\n';
+  std::cerr << "[Error][Parser] Expected '" << Token::kindName(expectedKind)
+            << "', but got " << tok << '\n';
 
   return ASTError(ASTError::EXPECTED_TOKEN);
 }

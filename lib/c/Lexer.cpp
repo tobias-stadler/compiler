@@ -6,7 +6,7 @@ namespace c {
 std::ostream &operator<<(std::ostream &os, Token tok) {
   os << Token::kindName(tok.kind);
   if (tok.isValidString()) {
-    os << '(' << std::string_view(tok) << ')';
+    os << " \'" << std::string_view(tok) << '\'';
   }
   return os;
 }
@@ -223,4 +223,186 @@ void Lexer::eatChar() {
 }
 void Lexer::dropToken() { getToken(); }
 
+const char *Token::kindName(Kind kind) {
+  switch (kind) {
+  case END:
+    return "EOF";
+  case SPACE:
+    return "whitespace";
+  case COMMENT:
+    return "comment";
+  case IDENTIFIER:
+    return "identifier";
+  case LITERAL_NUM:
+    return "number literal";
+  case LITERAL_CHAR:
+    return "char literal";
+  case LITERAL_STR:
+    return "string literal";
+  case ESCAPE:
+    return "\\";
+  case KEYWORD_AUTO:
+    return "auto";
+  case KEYWORD_BREAK:
+    return "break";
+  case KEYWORD_CASE:
+    return "case";
+  case KEYWORD_CHAR:
+    return "char";
+  case KEYWORD_CONST:
+    return "const";
+  case KEYWORD_CONTINUE:
+    return "continue";
+  case KEYWORD_DEFAULT:
+    return "default";
+  case KEYWORD_DO:
+    return "do";
+  case KEYWORD_DOUBLE:
+    return "double";
+  case KEYWORD_ELSE:
+    return "else";
+  case KEYWORD_ENUM:
+    return "enum";
+  case KEYWORD_EXTERN:
+    return "extern";
+  case KEYWORD_FLOAT:
+    return "float";
+  case KEYWORD_FOR:
+    return "for";
+  case KEYWORD_GOTO:
+    return "goto";
+  case KEYWORD_IF:
+    return "if";
+  case KEYWORD_INLINE:
+    return "inline";
+  case KEYWORD_INT:
+    return "int";
+  case KEYWORD_LONG:
+    return "long";
+  case KEYWORD_REGISTER:
+    return "register";
+  case KEYWORD_RESTRICT:
+    return "restrict";
+  case KEYWORD_RETURN:
+    return "return";
+  case KEYWORD_SHORT:
+    return "short";
+  case KEYWORD_SIGNED:
+    return "signed";
+  case KEYWORD_SIZEOF:
+    return "sizeof";
+  case KEYWORD_STATIC:
+    return "static";
+  case KEYWORD_STRUCT:
+    return "struct";
+  case KEYWORD_SWITCH:
+    return "switch";
+  case KEYWORD_TYPEDEF:
+    return "typedef";
+  case KEYWORD_UNION:
+    return "union";
+  case KEYWORD_UNSIGNED:
+    return "unsigned";
+  case KEYWORD_VOID:
+    return "void";
+  case KEYWORD_VOLATILE:
+    return "volatile";
+  case KEYWORD_WHILE:
+    return "while";
+  case KEYWORD__BOOL:
+    return "_Bool";
+  case PUNCT_SEMICOLON:
+    return ";";
+  case PUNCT_COLON:
+    return ":";
+  case PUNCT_COMMA:
+    return ",";
+  case PUNCT_DOT:
+    return ".";
+  case PUNCT_STAR:
+    return "*";
+  case PUNCT_PLUS:
+    return "+";
+  case PUNCT_MINUS:
+    return "-";
+  case PUNCT_SQUAREO:
+    return "[";
+  case PUNCT_SQUAREC:
+    return "]";
+  case PUNCT_CURLYO:
+    return "{";
+  case PUNCT_CURLYC:
+    return "}";
+  case PUNCT_PARENO:
+    return "(";
+  case PUNCT_PARENC:
+    return ")";
+  case PUNCT_EQ:
+    return "==";
+  case PUNCT_AND:
+    return "&";
+  case PUNCT_OR:
+    return "|";
+  case PUNCT_XOR:
+    return "^";
+  case PUNCT_SLASH:
+    return "/";
+  case PUNCT_TILDE:
+    return "~";
+  case PUNCT_LT:
+    return "<";
+  case PUNCT_GT:
+    return ">";
+  case PUNCT_EXCLAMATION:
+    return "!";
+  case PUNCT_QUESTION:
+    return "?";
+  case PUNCT_PERCENT:
+    return "%";
+  case PUNCT_EQEQ:
+    return "==";
+  case PUNCT_OROR:
+    return "||";
+  case PUNCT_OREQ:
+    return "|=";
+  case PUNCT_ANDAND:
+    return "&&";
+  case PUNCT_ANDEQ:
+    return "&=";
+  case PUNCT_PLUSPLUS:
+    return "++";
+  case PUNCT_PLUSEQ:
+    return "+=";
+  case PUNCT_MINUSMINUS:
+    return "--";
+  case PUNCT_MINUSEQ:
+    return "-=";
+  case PUNCT_STAREQ:
+    return "*=";
+  case PUNCT_EXCLAMATIONEQ:
+    return "!=";
+  case PUNCT_XOREQ:
+    return "^=";
+  case PUNCT_SLASHEQ:
+    return "/=";
+  case PUNCT_PERCENTEQ:
+    return "%=";
+  case PUNCT_LTEQ:
+    return "<=";
+  case PUNCT_LTLT:
+    return "<<";
+  case PUNCT_LTLTEQ:
+    return "<<=";
+  case PUNCT_GTEQ:
+    return ">=";
+  case PUNCT_GTGT:
+    return ">>";
+  case PUNCT_GTGTEQ:
+    return ">>=";
+  case PUNCT_ARROW:
+    return "->";
+  default:
+    return "<illegal>";
+  }
+}
 } // namespace c

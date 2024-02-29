@@ -13,17 +13,18 @@ namespace c {
 class DeclSpec {
 public:
   DeclSpec() = default;
-  DeclSpec(Symbol::Kind symbolKind, CountedPtr<Type> type,
-           Type::Qualifier qualifier)
-      : symbolKind(symbolKind), type(std::move(type)), qualifier(qualifier) {}
+  DeclSpec(Symbol::Kind symbolKind, Type *type,
+           QualifiedType::Qualifier qualifier)
+      : symbolKind(symbolKind), type(type), qualifier(qualifier) {}
   Symbol::Kind symbolKind = Symbol::EMPTY;
-  CountedPtr<Type> type;
-  Type::Qualifier qualifier;
+  Type *type;
+  QualifiedType::Qualifier qualifier;
 };
 
 class Parser {
 public:
-  Parser(Lexer &lex, SymbolTable &sym) : lex(&lex), sym(&sym) {
+  Parser(ASTContext &ctx, Lexer &lex, SymbolTable &sym)
+      : lex(&lex), sym(&sym), ctx(ctx) {
     sym.clearScopeStack();
   }
 
@@ -35,6 +36,7 @@ public:
     STRUCT,
     ENUM,
     FUNC_DEF,
+    FUNC_PARAMS,
     ST_EXPRESSION,
     ST_IF,
     ST_FOR,
@@ -62,8 +64,7 @@ public:
   ASTPtrResult parsePostfix(AST::Ptr base);
 
   ASTPtrResult parseDeclaration();
-  ASTResult<CountedPtr<StructType>> parseStruct();
-  ASTResult<CountedPtr<EnumType>> parseEnum();
+  ASTResult<Type *> parseStruct();
 
   ASTResult<DeclaratorAST> parseDeclarator(bool abstract);
   ASTResult<DeclaratorAST> parseDirectDeclarator(bool abstract);
@@ -85,5 +86,6 @@ private:
   Lexer *lex;
   SymbolTable *sym;
   FrameLogger<ErrCtx> log;
+  ASTContext &ctx;
 };
 } // namespace c

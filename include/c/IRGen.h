@@ -7,6 +7,7 @@
 
 namespace c {
 
-std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, SymbolTable &sym);
+std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, ASTContext &ctx,
+                                  SymbolTable &sym);
 
 }

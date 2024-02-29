@@ -119,7 +119,8 @@ public:
 class IRGenASTVisitor : public ASTVisitor<IRGenASTVisitor>,
                         public ExpressionSemantics::Handler {
 public:
-  IRGenASTVisitor(SymbolTable &sym) : sema(*this), storage(ir), sym(sym) {}
+  IRGenASTVisitor(ASTContext &ctx, SymbolTable &sym)
+      : ExpressionSemantics::Handler(ctx), sema(*this), storage(ir), sym(sym) {}
 
   void visitTranslationUnit(TranslationUnitAST &ast) {
     sym.pushScope(ast.scope);
@@ -139,7 +140,7 @@ public:
     sym.pushScope(ast.funcScope);
     sym.pushScope(ast.blockScope);
 
-    auto returnTypeKind = ast.getType().getBaseType()->getKind();
+    auto returnTypeKind = ast.getType().getBaseType().getKind();
     if (returnTypeKind != Type::VOID) {
       ir.getFunc().returnTypes.push_back(&irType(returnTypeKind));
     }
@@ -175,7 +176,7 @@ public:
             std::make_unique<StaticMemory>());
       } else if (sym.scope().isBlock()) {
         auto &sInfo = storage.declareLocal(*s);
-        auto tyKind = s->getType()->getKind();
+        auto tyKind = s->getType().getKind();
         if ((Type::isInteger(tyKind) || tyKind == Type::PTR) &&
             !s->isAddrTaken()) {
           allocateSSA(sInfo);
@@ -185,7 +186,7 @@ public:
         if (initializer) {
           dispatch(*initializer);
           sema.expectRValueImplicitConv();
-          sema.expectTypeKindImplicitConv(sInfo.symbol->getType()->getKind());
+          sema.expectTypeKindImplicitConv(sInfo.symbol->getType().getKind());
           auto rhs = saveExprState();
 
           tmpSymbol = sInfo.symbol;
@@ -199,7 +200,7 @@ public:
 
   void allocateStack(StorageBuilder::StorageInfo &s) {
     assert(s.kind == StorageBuilder::EMPTY);
-    auto [size, align] = mem.getSizeAndAlignment(*s.symbol->getType());
+    auto [size, align] = mem.getSizeAndAlignment(s.symbol->getType());
 
     Operand &ptr = ir->emitOtherSSADefRef(
         irType(Type::PTR),
@@ -228,7 +229,7 @@ public:
   void visitNum(NumAST &ast) {
     ir->emitConstInt(IntSSAType::get(32), ast.num);
     tmpOperand = &ir.getDef();
-    sema.fromType(BasicType::create(Type::SINT));
+    sema.fromType(ctx.make_type<BasicType>(Type::SINT));
   }
 
   void visitVar(VarAST &ast) {
@@ -291,7 +292,7 @@ public:
     sema.expectLValue();
     loadAddr();
     assert(tmpOperand);
-    auto &structTy = as<StructType>(*sema.getType());
+    auto &structTy = as<StructType>(sema.getType());
     auto idx = structTy.getNamedMemberIdx(ast.ident);
     if (idx < 0) {
       error("Invalid member ident");
@@ -307,7 +308,7 @@ public:
       tmpOperand = &ir.getDef();
     }
 
-    sema.setType(structTy.getMemberType(idx).make_counted_from_this());
+    sema.setType(structTy.getMemberType(idx));
     sema.setCategory(ExpressionSemantics::LVALUE_MEM);
   }
 
@@ -399,7 +400,7 @@ public:
       ir->emitCmp(irBrCond(ast.getKind(), Type::isSigned(sema.getTypeKind())),
                   *lhs, *rhs);
       tmpOperand = &ir.getDef();
-      sema.fromType(BasicType::create(Type::BOOL));
+      sema.fromType(ctx.make_type<BasicType>(Type::BOOL));
       break;
     }
     default:
@@ -486,8 +487,7 @@ public:
     if (ast.expr) {
       dispatch(*ast.expr);
       sema.expectRValueImplicitConv();
-      assert(funcAST->getType().getBaseType());
-      sema.expectTypeImplicitConv(*funcAST->getType().getBaseType());
+      sema.expectTypeImplicitConv(funcAST->getType().getBaseType());
       ir->emitReturn(*tmpOperand);
     } else {
       ir->emitReturn();
@@ -498,7 +498,7 @@ public:
     dispatch(*ast.child);
     sema.expectCategory(ExpressionSemantics::LVALUE_SYMBOL);
     sema.expectTypeKind(Type::FUNC);
-    auto &funcTy = static_cast<FuncType &>(*tmpSymbol->getType());
+    auto &funcTy = static_cast<FuncType &>(tmpSymbol->getType());
     auto *func = ir.getProgram().getFunction(tmpSymbol->getName());
     assert(func);
 
@@ -510,7 +510,7 @@ public:
     for (auto &arg : ast.args) {
       dispatch(*arg);
       sema.expectRValueImplicitConv();
-      sema.expectTypeImplicitConv(*funcTy.getParamType(argNum));
+      sema.expectTypeImplicitConv(funcTy.getParamType(argNum));
       argOperands.push_back(tmpOperand);
       ++argNum;
     }
@@ -553,7 +553,7 @@ public:
       tmpOperand = nullptr;
       return;
     }
-    auto [size, align] = mem.getSizeAndAlignment(*sema.getType());
+    auto [size, align] = mem.getSizeAndAlignment(sema.getType());
     ir->emitStore(operand, *tmpOperand,
                   ir.getFunc().createMemoryAccess(size, align));
     tmpOperand = nullptr;
@@ -571,7 +571,7 @@ public:
       assert(tmpOperand);
       return;
     }
-    auto [size, align] = mem.getSizeAndAlignment(*sema.getType());
+    auto [size, align] = mem.getSizeAndAlignment(sema.getType());
     ir->emitLoad(irType(sema.getTypeKind()), *tmpOperand,
                  ir.getFunc().createMemoryAccess(size, align));
     tmpOperand = &ir.getDef();
@@ -624,8 +624,9 @@ public:
 };
 } // namespace
 
-std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, SymbolTable &sym) {
-  auto gen = IRGenASTVisitor(sym);
+std::unique_ptr<Program> IRGenAST(TranslationUnitAST &ast, ASTContext &ctx,
+                                  SymbolTable &sym) {
+  auto gen = IRGenASTVisitor(ctx, sym);
   sym.clearScopeStack();
   gen.ir.startProgram();
   gen.dispatch(ast);

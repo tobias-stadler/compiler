@@ -18,12 +18,15 @@ public:
   enum class Linkage { EXTERNAL, INTERNAL, NONE };
   enum class StorageDuration { STATIC, THREAD, AUTOMATIC, ALLOCATED, NONE };
   enum class Namespace { ORDINARY, LABEL, TAG, MEMBER };
-  Symbol(Kind kind, CountedPtr<Type> type, std::string_view name, Namespace ns)
+  Symbol(Kind kind, Type *type, std::string_view name, Namespace ns)
       : kind(kind), type(std::move(type)), name(name), ns(ns) {}
 
   Kind getKind() const { return kind; }
 
-  CountedPtr<Type> &getType() { return type; }
+  Type &getType() {
+    assert(type);
+    return *type;
+  }
 
   SymbolId getId() const { return id; }
 
@@ -61,7 +64,7 @@ public:
 private:
   Kind kind;
   Namespace ns;
-  CountedPtr<Type> type;
+  Type *type;
   std::unique_ptr<AST> ast;
   SymbolId id = 0;
   std::string_view name;
