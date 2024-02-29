@@ -13,7 +13,7 @@
 
 class SSARenumberTable {
 public:
-  Operand *get(SSASymbolId id) {
+  Operand *get(SymbolId id) {
     auto it = symbols.find(id);
     if (it == symbols.end()) {
       return nullptr;
@@ -21,8 +21,8 @@ public:
     return it->second;
   }
 
-  void set(SSASymbolId id, Operand &def) { symbols[id] = &def; }
-  void set(SSASymbolId id, Operand *def) {
+  void set(SymbolId id, Operand &def) { symbols[id] = &def; }
+  void set(SymbolId id, Operand *def) {
     if (!def)
       return;
     set(id, *def);
@@ -50,15 +50,15 @@ public:
     return *static_cast<SSARenumberTable *>(b.userData);
   }
 
-  std::unordered_map<SSASymbolId, Operand *> symbols;
-  std::vector<std::pair<Instr *, SSASymbolId>> incompletePhis;
+  std::unordered_map<SymbolId, Operand *> symbols;
+  std::vector<std::pair<Instr *, SymbolId>> incompletePhis;
   bool marked = false;
   bool sealed = false;
 };
 
 class SSABuilder {
 public:
-  static Operand *load(SSASymbolId id, SSAType &type, Block &block) {
+  static Operand *load(SymbolId id, SSAType &type, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     Operand *def = renum.get(id);
     if (def) {
@@ -107,7 +107,7 @@ public:
     return def;
   }
 
-  static void store(SSASymbolId id, Operand &def, Block &block) {
+  static void store(SymbolId id, Operand &def, Block &block) {
     auto &renum = SSARenumberTable::getTable(block);
     renum.set(id, def);
   }
@@ -153,7 +153,7 @@ private:
     return *nonSelfDef;
   }
 
-  static void populatePhi(PhiInstrPtr phi, SSASymbolId id) {
+  static void populatePhi(PhiInstrPtr phi, SymbolId id) {
     phi.setupPredecessors(phi->getParent().getNumPredecessors());
     unsigned predNum = 0;
     for (auto &use : phi->getParent().getDef().ssaDef()) {

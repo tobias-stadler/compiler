@@ -45,8 +45,8 @@ int main(int argc, char *argv[]) {
   c::Parser p(lex, sym);
 
   auto ast = p.parseTranslationUnit();
-  if (!ast) {
-    std::cout << "Parsing failed\n";
+  if (!ast || lex.peekTokenKind() != c::Token::END) {
+    p.printErrCtx(std::cerr);
     return EXIT_FAILURE;
   }
   std::cout << "Parsing finished\n";

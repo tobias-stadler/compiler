@@ -17,7 +17,7 @@ std::array<BasicType, Type::NUM_BASIC> basicTypes = initBasicTypes(false);
 std::array<BasicType, Type::NUM_BASIC> basicTypesC = initBasicTypes(true);
 } // namespace
 
-BasicType::BasicType(Kind kind, Qualifier qualifier) : Type(kind, qualifier) {
+BasicType::BasicType(Kind kind, Qualifier qualifier) : Type(kind, qualifier, true) {
   assert(isBasic(kind) && "Expected basic kind");
 }
 

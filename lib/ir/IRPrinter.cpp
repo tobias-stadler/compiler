@@ -1,6 +1,7 @@
 #include "ir/IRPrinter.h"
 #include "ir/IR.h"
 #include "ir/IRVisitor.h"
+#include "support/RTTI.h"
 #include "support/Utility.h"
 #include <cassert>
 #include <iostream>
@@ -14,20 +15,22 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
   if (auto n = numbering.getNum(op)) {
     std::cout << "%" << *n;
   } else {
-    std::cout << "(";
     switch (op.getKind()) {
     case Operand::EMPTY:
-      std::cout << "Empty";
+      std::cout << "empty(";
       break;
     case Operand::SSA_DEF_TYPE:
-      std::cout << "unnamed def";
+      std::cout << "unnamed(";
       break;
     case Operand::SSA_DEF_OTHER: {
       OtherSSADef &def = op.ssaDefOther();
       if (def.isGlobal()) {
+        std::cout << "global(";
         std::cout << def.global().getName();
+      } else if (auto *m = as_dyn<MemoryAccessDef>(def)) {
+        std::cout << "mem(" << m->getSize() << "," << m->getAlign().getExp();
       } else {
-        std::cout << "unkown def";
+        std::cout << "unknown(";
       }
       break;
     }

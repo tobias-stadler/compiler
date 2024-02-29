@@ -213,6 +213,8 @@ class FrameLoweringPass : public IRPass<Function> {
   }
 
   void insertPrologue(InstrBuilder &ir) {
+    if (frameSize == 0)
+      return;
     Instr &i = ir.emitInstr(riscv::ADDI, 3);
     i.emplaceOperand<Operand::REG_DEF>(ALIAS_sp);
     i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
@@ -220,6 +222,8 @@ class FrameLoweringPass : public IRPass<Function> {
   }
 
   void insertEpilogue(InstrBuilder &ir) {
+    if (frameSize == 0)
+      return;
     Instr &i = ir.emitInstr(riscv::ADDI, 3);
     i.emplaceOperand<Operand::REG_DEF>(ALIAS_sp);
     i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
@@ -268,6 +272,7 @@ public:
   const char *name() override { return "RiscVAsmPrinterPass"; }
   void run(Program &prog, IRInfo<Program> &info) override {
     blockToNum.clear();
+    currBlockNum = 0;
 
     out << ".option nopic\n";
     out << ".attribute arch, \"rv32i\"\n";
@@ -278,10 +283,8 @@ public:
   }
 
   void printFunction(Function &func) {
-    blockToNum.clear();
-    unsigned blockNum = 0;
     for (auto &block : func) {
-      blockToNum[&block] = blockNum++;
+      blockToNum[&block] = currBlockNum++;
     }
     printFunctionLabel(func);
     out << ":\n";
@@ -308,9 +311,24 @@ public:
       return;
     }
     out << archInstr->alias;
-    if (instr.getNumOperands() != 0) {
-      out << " ";
+    if (instr.getNumOperands() == 0)
+      return;
+
+    out << " ";
+
+    switch (instr.getKind()) {
+    case LBU:
+    case LB:
+    case LHU:
+    case LH:
+    case LW:
+    case SB:
+    case SH:
+    case SW:
+      printLoadStoreOperands(instr);
+      return;
     }
+
     bool first = true;
     for (auto &op : instr) {
       if (op.isImplicit())
@@ -322,6 +340,15 @@ public:
       }
       printOperand(op);
     }
+  }
+
+  void printLoadStoreOperands(Instr &instr) {
+    printOperand(instr.getOperand(0));
+    out << ", ";
+    printOperand(instr.getOperand(2));
+    out << "(";
+    printOperand(instr.getOperand(1));
+    out << ")";
   }
 
   void printFunctionLabel(Function &func) { out << func.getName(); }
@@ -383,6 +410,7 @@ public:
   }
 
   unsigned currIndent;
+  size_t currBlockNum;
   std::unordered_map<Block *, unsigned> blockToNum;
   std::ostream &out;
 };

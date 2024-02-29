@@ -44,6 +44,9 @@ public:
   CountedPtr(CountedPtr<U> &&o) noexcept
       : mPtr(std::exchange(o.mPtr, nullptr)) {}
 
+  template <typename U>
+  CountedPtr(const CountedPtr<U> &o) : CountedPtr(o.mPtr) {}
+
   template <typename U> CountedPtr &operator=(CountedPtr<U> &&o) noexcept {
     reset();
     mPtr = std::exchange(o.mPtr, nullptr);

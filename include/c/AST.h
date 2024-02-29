@@ -347,9 +347,10 @@ public:
 
 class DeclarationAST : public AST {
 public:
-  DeclarationAST(Symbol::Kind symbolKind) : AST(DECLARATION), symbolKind(symbolKind) {}
+  DeclarationAST(Symbol::Kind symbolKind)
+      : AST(DECLARATION), symbolKind(symbolKind) {}
 
-  Symbol::Kind symbolKind = Symbol::EMPTY;
+  Symbol::Kind symbolKind;
   std::vector<std::pair<DeclaratorAST, Ptr>> declarators;
 };
 
@@ -384,6 +385,7 @@ public:
   enum Kind {
     EMPTY,
     NOP,
+    OTHER,
     EXPECTED_TOKEN,
   };
   ASTError(Kind kind) : kind(kind) {}

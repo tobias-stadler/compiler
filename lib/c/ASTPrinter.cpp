@@ -3,6 +3,8 @@
 #include "c/ASTVisitor.h"
 #include "c/Type.h"
 
+#include <unordered_set>
+
 namespace c {
 
 namespace {
@@ -256,6 +258,11 @@ public:
   }
 
   void printStructType(StructType &type) {
+    auto [_, succ] = seenTypes.insert(&type);
+    if (!succ) {
+      std::cout << "...";
+      return;
+    }
     std::cout << "struct {";
     for (auto &subType : type.members) {
       std::cout << "\n";
@@ -265,6 +272,9 @@ public:
     std::cout << "\n";
     std::cout << "}";
   }
+
+private:
+  std::unordered_set<Type *> seenTypes;
 };
 } // namespace
 

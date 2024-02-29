@@ -239,24 +239,26 @@ public:
     return i.getDef();
   }
 
-  Operand &emitOtherSSADefRef(SSAType& type, OtherSSADef &def) {
+  Operand &emitOtherSSADefRef(SSAType &type, OtherSSADef &def) {
     Instr &i = emitInstr(Instr::REF_OTHERSSADEF, 2);
     i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::SSA_USE>(def.getDef());
     return i.getDef();
   }
 
-  Instr &emitLoad(SSAType &type, Operand &addr) {
-    Instr &i = emitInstr(Instr::LOAD, 2);
+  Instr &emitLoad(SSAType &type, Operand &addr, MemoryAccessDef &memAccess) {
+    Instr &i = emitInstr(Instr::LOAD, 3);
     i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::SSA_USE>(addr);
+    i.emplaceOperand<Operand::SSA_USE>(memAccess.getDef());
     return i;
   }
 
-  Instr &emitStore(Operand &val, Operand &addr) {
-    Instr &i = emitInstr(Instr::STORE, 2);
+  Instr &emitStore(Operand &val, Operand &addr, MemoryAccessDef &memAccess) {
+    Instr &i = emitInstr(Instr::STORE, 3);
     i.emplaceOperand<Operand::SSA_USE>(val);
     i.emplaceOperand<Operand::SSA_USE>(addr);
+    i.emplaceOperand<Operand::SSA_USE>(memAccess.getDef());
     return i;
   }
 

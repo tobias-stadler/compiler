@@ -12,10 +12,10 @@ template <typename T, typename U> T &as(U &ref) {
 }
 
 template <typename T, typename U> T *as_dyn(U *ptr) {
-  return ptr && T::is_impl(*ptr) ? ptr : nullptr;
+  return ptr && T::is_impl(*ptr) ? static_cast<T *>(ptr) : nullptr;
 }
 template <typename T, typename U> T *as_dyn(U &ref) {
-  return T::is_impl(ref) ? &ref : nullptr;
+  return T::is_impl(ref) ? static_cast<T *>(&ref) : nullptr;
 }
 
 template <typename T, typename U> bool is(U *ptr) {

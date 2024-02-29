@@ -398,4 +398,4 @@ private:
     }
   }
 };
-} // namespace C
+} // namespace c

@@ -160,6 +160,10 @@ bool PreISelExpansion::execute(Instr &instr) {
   case Instr::BR_COND:
     legalizeOperands(Instr::EXT_Z, instr, {&instr.getOperand(0)});
     break;
+  case Instr::LOAD:
+  case Instr::STORE:
+    legalizeAllOperands(Instr::EXT_A, instr);
+    break;
   }
   if (DslPatExecutor(observer).dslExecutePat(instr)) {
     instr.deleteThis();

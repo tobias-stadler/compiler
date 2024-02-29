@@ -7,26 +7,30 @@
 
 namespace c {
 
+class AST;
+
 class Symbol {
+  friend class Scope;
   friend class SymbolTable;
 
 public:
-  enum Kind { EMPTY, TYPEDEF, EXTERN, STATIC, AUTO, REGISTER };
+  enum Kind { EMPTY, TYPEDEF, EXTERN, STATIC, AUTO, REGISTER, CONSTEXPR };
   enum class Linkage { EXTERNAL, INTERNAL, NONE };
   enum class StorageDuration { STATIC, THREAD, AUTOMATIC, ALLOCATED, NONE };
-  Symbol(Kind kind, CountedPtr<Type> type, std::string_view name)
-      : kind(kind), type(std::move(type)), name(name) {}
+  enum class Namespace { ORDINARY, LABEL, TAG, MEMBER };
+  Symbol(Kind kind, CountedPtr<Type> type, std::string_view name, Namespace ns)
+      : kind(kind), type(std::move(type)), name(name), ns(ns) {}
 
-  Kind getKind() { return kind; }
+  Kind getKind() const { return kind; }
 
   CountedPtr<Type> &getType() { return type; }
 
-  SSASymbolId getId() { return id; }
+  SymbolId getId() const { return id; }
 
-  bool isAddrTaken() { return addrTaken; }
+  bool isAddrTaken() const { return addrTaken; }
   void setAddrTaken(bool taken) { addrTaken = taken; }
 
-  Linkage getLinkage() {
+  Linkage getLinkage() const {
     switch (kind) {
     case EXTERN:
       return Linkage::EXTERNAL;
@@ -37,7 +41,7 @@ public:
     }
   }
 
-  StorageDuration getStorageDuration() {
+  StorageDuration getStorageDuration() const {
     switch (kind) {
     case EXTERN:
     case STATIC:
@@ -45,18 +49,21 @@ public:
     case AUTO:
     case REGISTER:
       return StorageDuration::AUTOMATIC;
-    case EMPTY:
-    case TYPEDEF:
+    default:
       return StorageDuration::NONE;
     }
   }
 
   std::string_view getName() const { return name; }
 
+  Namespace getNamespace() const { return ns; }
+
 private:
   Kind kind;
+  Namespace ns;
   CountedPtr<Type> type;
-  SSASymbolId id = 0;
+  std::unique_ptr<AST> ast;
+  SymbolId id = 0;
   std::string_view name;
   bool addrTaken = false;
 };
@@ -68,7 +75,7 @@ public:
   Scope(Kind kind) : kind(kind) {}
 
   Symbol *declareSymbol(IdentId identId, Symbol symbol);
-  Symbol *getSymbol(IdentId identId);
+  Symbol *getSymbol(IdentId identId, Symbol::Namespace ns);
   Kind getKind() { return kind; }
 
   bool isFile() { return kind == FILE; };
@@ -94,7 +101,7 @@ public:
 
 private:
   Kind kind;
-  std::unordered_map<IdentId, Symbol> symbols;
+  std::map<std::pair<IdentId, Symbol::Namespace>, Symbol> symbols;
 };
 
 class SymbolTable {
@@ -155,12 +162,12 @@ public:
     return it->second;
   }
 
-  Symbol *getSymbol(std::string_view name) {
+  Symbol *getSymbol(std::string_view name, Symbol::Namespace ns) {
     auto idIt = identIdMap.find(name);
     if (idIt == identIdMap.end())
       return nullptr;
     for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-      auto *sym = (*it)->getSymbol(idIt->second);
+      auto *sym = (*it)->getSymbol(idIt->second, ns);
       if (sym)
         return sym;
     }
@@ -171,19 +178,20 @@ private:
   std::vector<Scope *> scopes;
   std::unordered_map<std::string_view, IdentId> identIdMap;
   IdentId nextIdentId = 1;
-  SSASymbolId nextSymId = 1;
+  SymbolId nextSymId = 1;
 };
 
 inline Symbol *Scope::declareSymbol(IdentId identId, Symbol symbol) {
-  auto [it, succ] = symbols.try_emplace(identId, std::move(symbol));
+  auto [it, succ] =
+      symbols.try_emplace({identId, symbol.getNamespace()}, std::move(symbol));
   if (succ) {
     return &it->second;
   }
   return nullptr;
 }
 
-inline Symbol *Scope::getSymbol(IdentId identId) {
-  auto it = symbols.find(identId);
+inline Symbol *Scope::getSymbol(IdentId identId, Symbol::Namespace ns) {
+  auto it = symbols.find({identId, ns});
   if (it == symbols.end()) {
     return nullptr;
   }

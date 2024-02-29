@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ir/FrameLayout.h"
+#include "ir/MemoryAccess.h"
 #include "ir/Operand.h"
 #include "support/IntrusiveList.h"
 #include "support/RTTI.h"
@@ -15,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-using SSASymbolId = unsigned;
+using SymbolId = unsigned;
 
 class Function;
 
@@ -75,8 +76,15 @@ public:
 
   FrameLayout &getFrameLayout() { return frameLayout; }
 
+  template <typename... Args>
+  MemoryAccessDef &createMemoryAccess(Args... args) {
+    return *memoryAccess.emplace_back(
+        std::make_unique<MemoryAccessDef>(args...));
+  }
+
 private:
   FrameLayout frameLayout;
+  std::vector<std::unique_ptr<MemoryAccessDef>> memoryAccess;
 };
 
 class Block : public IntrusiveList<Instr, Block>,

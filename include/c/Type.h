@@ -40,6 +40,7 @@ public:
     ARR,
     STRUCT,
     UNION,
+    ENUM,
     FUNC,
     PTR,
     DERIVED_END
@@ -99,18 +100,25 @@ public:
 
   CountedPtr<Type> ptrType();
 
+  bool isComplete() { return complete; }
+
+  void setComplete(bool v) { complete = v; }
+
 protected:
-  Type(Kind kind, Qualifier qualifier) : kind(kind), qualifier(qualifier) {}
+  Type(Kind kind, Qualifier qualifier, bool complete)
+      : kind(kind), qualifier(qualifier), complete(complete) {}
   Qualifier qualifier;
 
 private:
   Kind kind;
+  bool complete;
 };
 
 class DerivedType : public Type {
 protected:
-  DerivedType(Kind kind, CountedPtr<Type> baseType, Qualifier qualifier)
-      : Type(kind, qualifier), baseType(baseType) {}
+  DerivedType(Kind kind, CountedPtr<Type> baseType, Qualifier qualifier,
+              bool complete)
+      : Type(kind, qualifier, complete), baseType(baseType) {}
 
 public:
   static bool is_impl(const Type &o) { return isDerived(o.getKind()); }
@@ -160,21 +168,21 @@ public:
 
   PtrType(CountedPtr<Type> baseType = nullptr,
           Qualifier qualifier = Qualifier())
-      : DerivedType(PTR, std::move(baseType), qualifier) {}
+      : DerivedType(PTR, std::move(baseType), qualifier, true) {}
 };
 
 class ArrType : public DerivedType {
 public:
   static bool is_impl(const Type &o) { return o.getKind() == ARR; }
 
-  ArrType() : DerivedType(ARR, nullptr, Qualifier()) {}
+  ArrType() : DerivedType(ARR, nullptr, Qualifier(), false) {}
 };
 
 class FuncType : public DerivedType {
 public:
   static bool is_impl(const Type &o) { return o.getKind() == FUNC; }
 
-  FuncType() : DerivedType(FUNC, nullptr, Qualifier()) {}
+  FuncType() : DerivedType(FUNC, nullptr, Qualifier(), false) {}
 
   CountedPtr<Type> &getParamType(size_t i) { return params[i].second; }
 
@@ -217,8 +225,8 @@ public:
     return o.getKind() == STRUCT || o.getKind() == UNION;
   }
 
-  StructType(bool isUnion, std::string_view name)
-      : Type(isUnion ? UNION : STRUCT, Qualifier()), name(name) {}
+  StructType(bool isUnion)
+      : Type(isUnion ? UNION : STRUCT, Qualifier(), false) {}
 
   bool isUnion() const { return getKind() == UNION; }
 
@@ -250,8 +258,14 @@ public:
   std::vector<CountedPtr<Type>> members;
 
 private:
-  std::string_view name;
   std::unordered_map<std::string_view, size_t> memberIndex;
+};
+
+class EnumType : public DerivedType {
+public:
+  static bool is_impl(const Type &o) { return o.getKind() == ENUM; }
+
+  EnumType() : DerivedType(ENUM, BasicType::create(SINT), Qualifier(), false) {}
 };
 
 } // namespace c

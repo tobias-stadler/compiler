@@ -141,6 +141,130 @@ ir_pat {
 }
 }
 
+let LoadPat = Template {
+ir_pat {
+  match {
+    LOAD def(%dst,i32) %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  emit {
+    riscv::OUT def(%dst,i32) %addr imm32(0);
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c, i32) #imm;
+    ADD def(%addr,i32) %base %c;
+    LOAD def(%dst,i32) %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  if {
+    $isLegalImm($ #imm $)$
+  }
+  emit {
+    riscv::OUT def(%dst,i32) %base #imm;
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c, i32) #imm;
+    ADD def(%addr,i32) %c %base;
+    LOAD def(%dst,i32) %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  if {
+    $isLegalImm($ #imm $)$
+  }
+  emit {
+    riscv::OUT def(%dst,i32) %base #imm;
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c, i32) #imm;
+    SUB def(%addr,i32) %base %c;
+    LOAD def(%dst,i32) %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  if {
+    $isLegalImmNegated($ #imm $)$
+  }
+  emit {
+    riscv::OUT def(%dst,i32) %base imm32($-$ #imm $.imm32()$);
+  }
+}
+}
+let StorePat = Template {
+ir_pat {
+  match {
+    STORE %src %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  emit {
+    riscv::OUT %src %addr imm32(0);
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c, i32) #imm;
+    ADD def(%addr,i32) %base %c;
+    STORE %src %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  if {
+    $isLegalImm($ #imm $)$
+  }
+  emit {
+    riscv::OUT %src %base #imm;
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c, i32) #imm;
+    ADD def(%addr,i32) %c %base;
+    STORE %src %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  if {
+    $isLegalImm($ #imm $)$
+  }
+  emit {
+    riscv::OUT %src %base #imm;
+  }
+}
+ir_pat {
+  match {
+    CONST_INT def(%c, i32) #imm;
+    SUB def(%addr,i32) %base %c;
+    STORE %src %addr %mem;
+  }
+  if {
+    $isLegalMemAccess($ %mem $,$ SZ_EXP $)$
+  }
+  if {
+    $isLegalImmNegated($ #imm $)$
+  }
+  emit {
+    riscv::OUT %src %base imm32($-$ #imm $.imm32()$);
+  }
+}
+}
+
+
 let ArtifactCombinePat = Template {
 ir_pat {
   match {
@@ -154,32 +278,6 @@ ir_pat {
 }
 
 let preISelExpansion = IRPatExecutor {
-ir_pat {
-  match {
-    LOAD def(%dst,i32) %addr;
-  }
-  emit {
-    riscv::LW def(%dst,i32) %addr imm32(0);
-  }
-}
-ir_pat {
-  match {
-    LOAD def(%dst,i16) %addr;
-  }
-  emit {
-    riscv::LH def(%ld,i32) %addr imm32(0);
-    TRUNC def(%dst,i16) %ld;
-  }
-}
-ir_pat {
-  match {
-    LOAD def(%dst,i8) %addr;
-  }
-  emit {
-    riscv::LB def(%ld,i32) %addr imm32(0);
-    TRUNC def(%dst,i8) %ld;
-  }
-}
 }
 
 let preISelCombine = IRPatExecutor {
@@ -476,34 +574,28 @@ ir_pat {
   let OUT = token {SRA}
 }
 
-ir_pat {
-  match {
-    STORE %src %addr;
-  }
-  if {
-    %src $.ssaDefType() == IntSSAType::get(32)$
-  }
-  emit {
-    riscv::SW %src %addr imm32(0);
-  }
+!LoadPat {
+  let SZ_EXP = token {0}
+  let OUT = token {LB}
 }
-ir_pat {
-  match {
-    TRUNC def(%tr,i16) %src;
-    STORE %tr %addr;
-  }
-  emit {
-    riscv::SH %src %addr imm32(0);
-  }
+!LoadPat {
+  let SZ_EXP = token {1}
+  let OUT = token {LH}
 }
-ir_pat {
-  match {
-    TRUNC def(%tr,i8) %src;
-    STORE %tr %addr;
-  }
-  emit {
-    riscv::SB %src %addr imm32(0);
-  }
+!LoadPat {
+  let SZ_EXP = token {2}
+  let OUT = token {LW}
 }
-
+!StorePat {
+  let SZ_EXP = token {0}
+  let OUT = token {SB}
+}
+!StorePat {
+  let SZ_EXP = token {1}
+  let OUT = token {SH}
+}
+!StorePat {
+  let SZ_EXP = token {2}
+  let OUT = token {SW}
+}
 }

@@ -95,7 +95,7 @@ public:
 
   StorageInfo &get(Symbol &symbol) { return get(symbol.getId()); }
 
-  StorageInfo &get(SSASymbolId id) {
+  StorageInfo &get(SymbolId id) {
     auto it = slots.find(id);
     assert(it != slots.end());
     return it->second;
@@ -103,7 +103,7 @@ public:
 
 private:
   IRBuilder &ir;
-  std::unordered_map<SSASymbolId, StorageInfo> slots;
+  std::unordered_map<SymbolId, StorageInfo> slots;
 };
 
 class ExprState {
@@ -146,7 +146,7 @@ public:
     for (auto [ident, ty] : ast.getType().getParams()) {
       auto &ssaTy = irType(ty->getKind());
       ir.getFunc().paramTypes.push_back(&ssaTy);
-      auto *s = sym.getSymbol(ident);
+      auto *s = sym.getSymbol(ident, Symbol::Namespace::ORDINARY);
       assert(s);
       auto &sInfo = storage.declareLocal(*s);
       allocateSSA(sInfo);
@@ -168,7 +168,7 @@ public:
 
   void visitDeclaration(DeclarationAST &ast) {
     for (auto &[d, initializer] : ast.declarators) {
-      auto *s = sym.getSymbol(d.ident);
+      auto *s = sym.getSymbol(d.ident, Symbol::Namespace::ORDINARY);
       assert(s);
       if (sym.scope().isFile()) {
         auto &mem = ir.getProgram().staticMems.emplace_back(
@@ -233,7 +233,7 @@ public:
 
   void visitVar(VarAST &ast) {
     tmpOperand = nullptr;
-    tmpSymbol = sym.getSymbol(ast.ident);
+    tmpSymbol = sym.getSymbol(ast.ident, Symbol::Namespace::ORDINARY);
     if (!tmpSymbol) {
       error("Symbol undeclared");
     }
@@ -553,7 +553,9 @@ public:
       tmpOperand = nullptr;
       return;
     }
-    ir->emitStore(operand, *tmpOperand);
+    auto [size, align] = mem.getSizeAndAlignment(*sema.getType());
+    ir->emitStore(operand, *tmpOperand,
+                  ir.getFunc().createMemoryAccess(size, align));
     tmpOperand = nullptr;
   }
 
@@ -569,7 +571,9 @@ public:
       assert(tmpOperand);
       return;
     }
-    ir->emitLoad(irType(sema.getTypeKind()), *tmpOperand);
+    auto [size, align] = mem.getSizeAndAlignment(*sema.getType());
+    ir->emitLoad(irType(sema.getTypeKind()), *tmpOperand,
+                 ir.getFunc().createMemoryAccess(size, align));
     tmpOperand = &ir.getDef();
   }
 

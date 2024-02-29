@@ -12,6 +12,38 @@
 #include <string>
 #include <string_view>
 
+#define P_ERR_CTX(x) auto log_err = log.logFrame(x)
+
+#define P_AST_EXPECT(x, msg)                                                   \
+  if (!x) [[unlikely]] {                                                       \
+    if (x.isNop()) {                                                           \
+      return error("Expected " msg);                                           \
+    }                                                                          \
+    return x.err();                                                            \
+  }
+
+#define P_AST_EXPECT_OR_NOP(x)                                                 \
+  if (!x) [[unlikely]] {                                                       \
+    if (!x.isNop()) {                                                          \
+      return x.err();                                                          \
+    }                                                                          \
+  }
+
+#define P_AST_EXPECT_FWD(x)                                                    \
+  if (!x) [[unlikely]] {                                                       \
+    return x.err();                                                            \
+  }
+
+#define P_TOK_EXPECT_NEXT(x)                                                   \
+  if (!lex->matchNextToken(x)) [[unlikely]] {                                  \
+    return errorExpectedToken(x);                                              \
+  }
+
+#define P_TOK_EXPECT_PEEK(x)                                                   \
+  if (!lex->matchPeekToken(x)) [[unlikely]] {                                  \
+    return errorExpectedToken(x);                                              \
+  }
+
 namespace c {
 
 namespace {
@@ -208,7 +240,8 @@ auto getTypeSpecSets() {
                                                         typeSpecSets.end());
 }
 
-static auto typeSpecSets = getTypeSpecSets();
+auto typeSpecSets = getTypeSpecSets();
+
 } // namespace
 
 ASTPtrResult Parser::parseUnary() {
@@ -218,12 +251,8 @@ ASTPtrResult Parser::parseUnary() {
   case Token::PUNCT_PARENO: {
     lex->dropToken();
     auto ex = parseExpression();
-    if (!ex) {
-      return error("Expected expresssion");
-    }
-    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-      return error("Expected closing paren");
-    }
+    P_AST_EXPECT(ex, "expression");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     res = ex.moveRes();
     break;
   }
@@ -241,11 +270,10 @@ ASTPtrResult Parser::parseUnary() {
     }
     lex->dropToken();
     auto subExpr = parseUnary();
-    if (!subExpr) {
-      return error("Expected expression after unary operator");
-    }
+    P_AST_EXPECT(subExpr, "expression after unary operator");
     if (unopKind == AST::ADDR && (*subExpr)->getKind() == AST::VAR) {
-      auto *s = sym->getSymbol(static_cast<VarAST &>(*subExpr->get()).ident);
+      auto *s = sym->getSymbol(static_cast<VarAST &>(*subExpr->get()).ident,
+                               Symbol::Namespace::ORDINARY);
       if (s) {
         s->setAddrTaken(true);
       }
@@ -259,9 +287,7 @@ ASTPtrResult Parser::parseUnary() {
 
 ASTPtrResult Parser::parseExpression(int prec) {
   auto lhs = parseUnary();
-  if (!lhs) {
-    return nop();
-  }
+  P_AST_EXPECT_FWD(lhs);
   while (true) {
     Token::Kind tokKind = lex->peekTokenKind();
     AST::Kind binopKind = tokenBinopKind(tokKind);
@@ -272,9 +298,7 @@ ASTPtrResult Parser::parseExpression(int prec) {
     lex->dropToken();
     auto rhs =
         parseExpression(precedenceRightAssoc(tokPrec) ? tokPrec : tokPrec + 1);
-    if (!rhs) {
-      return error("Expected expression after binop");
-    }
+    P_AST_EXPECT(rhs, "expression");
     lhs = new BinopAST(binopKind, lhs, rhs);
   }
 }
@@ -289,60 +313,41 @@ ASTPtrResult Parser::parseStatement() {
     return parseCompoundStatement();
   }
   case Token::KEYWORD_IF: {
+    P_ERR_CTX(ErrCtx::ST_IF);
     lex->dropToken();
-    if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
-      return error("Expected opening paren after if keyword");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
     auto expr = parseExpression();
-    if (!expr) {
-      return error("Expected expression after if keyword");
-    }
-    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-      return error("Expected closing paren after if expression");
-    }
+    P_AST_EXPECT(expr, "condition expression");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     auto st = parseStatement();
-    if (!st) {
-      return error("Expected statment after if");
-    }
+    P_AST_EXPECT(st, "statement");
     if (lex->matchNextToken(Token::KEYWORD_ELSE)) {
       auto stElse = parseStatement();
-      if (!stElse) {
-        return error("Expected statement after else");
-      }
+      P_AST_EXPECT(stElse, "else statement");
       return new IfStAST(expr, st, stElse);
     }
     return new IfStAST(expr, st);
   }
   case Token::KEYWORD_WHILE: {
+    P_ERR_CTX(ErrCtx::ST_WHILE);
     lex->dropToken();
-    if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
-      return error("Expected opening paren in while loop");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
     auto expr = parseExpression();
-    if (!expr) {
-      return error("Expected expression in while loop");
-    }
-    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-      return error("Expected closing paren after while expression");
-    }
+    P_AST_EXPECT(expr, "condition expression");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     auto st = parseStatement();
-    if (!st) {
-      return error("Expected statment after while");
-    }
+    P_AST_EXPECT(st, "statement");
     return new WhileStAST(expr, st);
   }
   case Token::KEYWORD_FOR: {
+    P_ERR_CTX(ErrCtx::ST_FOR);
     lex->dropToken();
-    if (!lex->matchNextToken(Token::PUNCT_PARENO)) {
-      return error("Expected opening paren after for keyword");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
     auto initClauseRes = parseDeclaration();
     AST::Ptr initClause = nullptr;
     if (initClauseRes.isNop()) {
       initClauseRes = parseExpression();
-      if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-        return error("Expected semicolon after init expression in for loop");
-      }
+      P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     }
     if (initClauseRes) {
       initClause = initClauseRes.moveRes();
@@ -357,9 +362,7 @@ ASTPtrResult Parser::parseStatement() {
     } else if (!exprCondRes.isNop()) {
       return error("Expected condition expression in for loop");
     }
-    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-      return error("Expected semicolon after condition expression in for loop");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     auto exprIterRes = parseExpression();
     AST::Ptr exprIter = nullptr;
     if (exprIterRes) {
@@ -367,13 +370,9 @@ ASTPtrResult Parser::parseStatement() {
     } else if (!exprIterRes.isNop()) {
       return error("Expected iter expression in for loop");
     }
-    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-      return error("Expected closing paren after for header");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     auto stRes = parseStatement();
-    if (!stRes) {
-      return error("Expected statment after for");
-    }
+    P_AST_EXPECT(stRes, "statement");
     return std::make_unique<ForStAST>(std::move(initClause),
                                       std::move(exprCond), std::move(exprIter),
                                       stRes.moveRes());
@@ -381,9 +380,7 @@ ASTPtrResult Parser::parseStatement() {
   case Token::KEYWORD_CONTINUE:
   case Token::KEYWORD_BREAK: {
     lex->dropToken();
-    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-      return error("Expected semicolon after loop control statement");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return std::make_unique<LoopCtrlStAST>(
         tokKind == Token::KEYWORD_CONTINUE ? AST::ST_CONTINUE : AST::ST_BREAK);
   }
@@ -391,52 +388,40 @@ ASTPtrResult Parser::parseStatement() {
   case Token::KEYWORD_RETURN: {
     lex->dropToken();
     auto exprRes = parseExpression();
+    P_AST_EXPECT_OR_NOP(exprRes);
     AST::Ptr expr = nullptr;
     if (exprRes) {
       expr = exprRes.moveRes();
-    } else if (!exprRes.isNop()) {
-      return error("Expected expression in return statement");
     }
-    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-      return error("Expected semicolon after return statement");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return std::make_unique<ReturnStAST>(std::move(expr));
   }
   default: {
+    P_ERR_CTX(ErrCtx::ST_EXPRESSION);
     auto st = parseExpression();
-    if (st.isNop()) {
-      return nop();
-    } else if (!st) {
-      return error("Expected expresssion statement");
-    }
-    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-      return error("Expected semicolon after expression statement");
-    }
+    P_AST_EXPECT_FWD(st);
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return st;
   }
   }
 }
 
-ASTError Parser::error(std::string_view str, Token tok) {
-  std::cerr << "[Error][Parser] " << str;
-  if (tok.isEmpty()) {
-    tok = lex->peekToken();
-  }
-  std::cerr << "; Exceptional Token: " << tok;
-  std::cerr << '\n';
-  return ASTError(ASTError::EXPECTED_TOKEN);
+ASTError Parser::error(std::string_view str) {
+  log.freeze();
+  std::cerr << "[Error][Parser] " << str << '\n';
+  return ASTError(ASTError::OTHER);
 }
 
 ASTPtrResult Parser::parseLiteralNum() {
   Token tok = lex->nextToken();
   if (tok.kind != Token::LITERAL_NUM) {
-    return error("Expected literal num", tok);
+    return errorExpectedToken(Token::LITERAL_NUM, tok);
   }
   std::string_view str(tok);
   int64_t num;
   auto res = std::from_chars(str.data(), str.data() + str.size(), num);
   if (res.ec != std::errc{}) {
-    return error("Invalid num", tok);
+    return error("Invalid num");
   }
   return new NumAST(num);
 }
@@ -448,32 +433,22 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
     lex->dropToken();
     if (abstract ? nextIsAbstractDeclarator() : first) {
       auto decl = parseDeclarator(abstract);
-      if (!decl) {
-        return error("Expected decl after opening paren");
-      }
-      if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-        return error("Expected closing paren");
-      }
+      P_AST_EXPECT(decl, "declarator");
+      P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
       return decl;
     } else {
       auto func = make_counted<FuncType>();
       if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
         do {
           auto spec = parseDeclSpec(true, true, false);
-          if (!spec) {
-            return error("Expected decl specifiers");
-          }
+          P_AST_EXPECT(spec, "declaration specifiers");
           auto decl = parseDeclarator(false);
-          if (!decl) {
-            return error("Expected declarator");
-          }
+          P_AST_EXPECT(decl, "declarator");
           decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
           func->addNamedParam(decl->ident, std::move(decl->type));
         } while (lex->matchNextToken(Token::PUNCT_COMMA));
       }
-      if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-        return error("Expected closing paren");
-      }
+      P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
       return DeclaratorAST(std::move(func));
     }
   }
@@ -510,21 +485,19 @@ ASTResult<DeclaratorAST> Parser::parseDirectDeclarator(bool abstract) {
 }
 
 ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
+  P_ERR_CTX(ErrCtx::DECLARATOR);
   switch (lex->peekTokenKind()) {
   case Token::PUNCT_STAR: {
     lex->dropToken();
     auto quali = Type::Qualifier();
     auto spec = parseDeclSpec(false, true, false);
+    P_AST_EXPECT_OR_NOP(spec);
     if (spec) {
       quali = spec->qualifier;
-    } else if (!spec.isNop()) {
-      return error("Expected qualifier after ptr-decl");
     }
 
     auto decl = parseDeclarator(abstract);
-    if (!decl) {
-      return error("Expected decl after ptr-decl");
-    }
+    P_AST_EXPECT(decl, "declarator after pointer-declarator");
     decl->spliceEnd(DeclaratorAST(make_counted<PtrType>(nullptr, quali)));
     return decl;
   }
@@ -534,21 +507,20 @@ ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
 }
 
 ASTPtrResult Parser::parseDeclaration() {
+  P_ERR_CTX(ErrCtx::DECLARATION);
   auto spec = parseDeclSpec(true, true, true);
-  if (spec.isNop()) {
-    return nop();
-  }
-  if (!spec) {
-    return error("Expected declaration specifiers");
-  }
+  P_AST_EXPECT_FWD(spec);
 
   auto decl = parseDeclarator(false);
+  P_AST_EXPECT_OR_NOP(decl);
   if (!decl) {
-    return error("Expected valid declarator");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
+    return std::make_unique<DeclarationAST>(Symbol::TYPEDEF);
   }
   decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
 
   if (nextIsDeclarationList()) {
+    P_ERR_CTX(ErrCtx::FUNC_DEF);
     // Parsing function definition
     if (!sym->scope().isFile()) {
       return error("Function definition only allowed in file scope");
@@ -564,8 +536,8 @@ ASTPtrResult Parser::parseDeclaration() {
     if (!(symbolKind == Symbol::EXTERN || symbolKind == Symbol::STATIC)) {
       return error("Invalid storage class for function");
     }
-    auto *s =
-        sym->declareSymbol(Symbol(symbolKind, ast->decl.type, decl->ident));
+    auto *s = sym->declareSymbol(Symbol(symbolKind, ast->decl.type, decl->ident,
+                                        Symbol::Namespace::ORDINARY));
     // TODO: prototype support
     if (!s) {
       return error("Function redefined");
@@ -574,12 +546,11 @@ ASTPtrResult Parser::parseDeclaration() {
     sym->pushScope(ast->funcScope);
     sym->pushScope(ast->blockScope);
     for (auto [ident, ty] : ast->getType().getParams()) {
-      sym->declareSymbol(Symbol(Symbol::AUTO, ty, ident));
+      sym->declareSymbol(
+          Symbol(Symbol::AUTO, ty, ident, Symbol::Namespace::ORDINARY));
     }
     auto st = parseCompoundStatement();
-    if (!st) {
-      return error("Expected compound statement in function definition");
-    }
+    P_AST_EXPECT(st, "compound statement for function definition");
     ast->st = st.moveRes();
     sym->popScope();
     sym->popScope();
@@ -592,9 +563,7 @@ ASTPtrResult Parser::parseDeclaration() {
     AST::Ptr initializer = nullptr;
     if (lex->matchNextToken(Token::PUNCT_EQ)) {
       auto expr = parseExpression();
-      if (!expr) {
-        return error("Expected valid expression as initializer");
-      }
+      P_AST_EXPECT(expr, "expression as initializer");
       initializer = expr.moveRes();
     }
     ast->declarators.emplace_back(decl.moveRes(), std::move(initializer));
@@ -602,21 +571,18 @@ ASTPtrResult Parser::parseDeclaration() {
       break;
     }
     decl = parseDeclarator(false);
-    if (!decl) {
-      return error("Expected valid declarator");
-    }
+    P_AST_EXPECT(decl, "declarator");
     decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
   }
 
-  if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-    return error("Expected semicolon after declaration");
-  }
+  P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
 
   Symbol::Kind symbolKind = sym->scope().getSymbolKind(ast->symbolKind);
   // TODO: verify symbolKind
 
   for (auto &[d, _] : ast->declarators) {
-    auto *s = sym->declareSymbol(Symbol(symbolKind, d.type, d.ident));
+    auto *s = sym->declareSymbol(
+        Symbol(symbolKind, d.type, d.ident, Symbol::Namespace::ORDINARY));
     if (!s) {
       return error(std::string("Symbol redeclared: ") + std::string(d.ident));
     }
@@ -629,12 +595,9 @@ ASTResult<std::unique_ptr<TranslationUnitAST>> Parser::parseTranslationUnit() {
   sym->pushScope(tu->scope);
   while (true) {
     auto declRes = parseDeclaration();
+    P_AST_EXPECT_OR_NOP(declRes);
     if (!declRes) {
-      if (declRes.isNop()) {
-        break;
-      } else {
-        return error("Expected external declaration");
-      }
+      break;
     }
     tu->declarations.push_back(declRes.moveRes());
   }
@@ -651,36 +614,28 @@ ASTPtrResult Parser::parseCompoundStatement() {
   sym->pushScope(st->scope);
   while (true) {
     ASTPtrResult subSt = parseBlockItem();
+    P_AST_EXPECT_OR_NOP(subSt);
     if (!subSt) {
-      if (subSt.isNop()) {
-        break;
-      }
-      return error("Expected block item");
+      break;
     }
     st->children.push_back(subSt);
   }
-  if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {
-    return error("Expected closing curly after compound statement");
-  }
+  P_TOK_EXPECT_NEXT(Token::PUNCT_CURLYC);
   sym->popScope();
   return st;
 }
 
 ASTPtrResult Parser::parseBlockItem() {
   auto declRes = parseDeclaration();
+  P_AST_EXPECT_OR_NOP(declRes);
   if (declRes) {
     return declRes;
   }
-  if (!declRes.isNop()) {
-    return error("Expected declaration");
-  }
 
   auto stRes = parseStatement();
+  P_AST_EXPECT_OR_NOP(stRes);
   if (stRes) {
     return stRes;
-  }
-  if (!stRes.isNop()) {
-    return error("Expected statement");
   }
   return nop();
 }
@@ -708,52 +663,84 @@ bool Parser::nextIsDeclarationList() {
 }
 
 ASTResult<CountedPtr<StructType>> Parser::parseStruct() {
+  P_ERR_CTX(ErrCtx::STRUCT);
   bool isUnion = false;
+  bool isStruct = false;
+  bool isEnum = false;
   switch (lex->peekTokenKind()) {
   case Token::KEYWORD_UNION:
     isUnion = true;
+    break;
   case Token::KEYWORD_STRUCT:
+    isStruct = true;
+    break;
+  case Token::KEYWORD_ENUM:
+    isEnum = true;
     break;
   default:
     return nop();
   }
   lex->dropToken();
   std::string_view name;
+  CountedPtr<StructType> res;
   if (lex->matchPeekToken(Token::IDENTIFIER)) {
     name = lex->nextToken();
+    if (auto *s = sym->getSymbol(name, Symbol::Namespace::TAG)) {
+      res = CountedPtr{as<StructType>(s->getType().get())};
+      if (!((isUnion && res->getKind() == Type::UNION) ||
+            (isStruct && res->getKind() == Type::STRUCT) ||
+            isEnum && res->getKind() == Type::ENUM)) {
+        return error("Redeclared tag with different specifier");
+      }
+    }
   }
-  auto res = make_counted<StructType>(isUnion, name);
+  if (!res) {
+    res = make_counted<StructType>(isUnion);
+    if (!name.empty()) {
+      sym->declareSymbol(
+          Symbol(Symbol::TYPEDEF, res, name, Symbol::Namespace::TAG));
+    }
+  }
   if (!lex->matchNextToken(Token::PUNCT_CURLYO)) {
     if (name.empty()) {
       return error("Expected identifier or struct declaration list");
     }
     return res;
   }
+  if (res->isComplete()) {
+    return error("Struct is already complete");
+  }
 
   while (true) {
     auto spec = parseDeclSpec(true, true, false);
-    if (spec.isNop()) {
+    P_AST_EXPECT_OR_NOP(spec);
+    if (!spec) {
       break;
-    } else if (!spec) {
-      return error("Expected declaration specifiers");
     }
     do {
       auto decl = parseDeclarator(false);
-      if (!decl) {
-        return error("Expected declarator");
-      }
+      P_AST_EXPECT(decl, "declarator");
       decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
       res->addNamedMember(decl->ident, std::move(decl->type));
     } while (lex->matchNextToken(Token::PUNCT_COMMA));
-    if (!lex->matchNextToken(Token::PUNCT_SEMICOLON)) {
-      return error("Expected semicolon after member declaration");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
   }
 
-  if (!lex->matchNextToken(Token::PUNCT_CURLYC)) {
-    return error("Expected closing curly");
-  }
+  res->setComplete(true);
+  P_TOK_EXPECT_NEXT(Token::PUNCT_CURLYC);
   return res;
+}
+
+ASTResult<CountedPtr<EnumType>> Parser::parseEnum() {
+  P_ERR_CTX(ErrCtx::ENUM);
+  if (!lex->matchNextToken(Token::KEYWORD_ENUM)) {
+    return nop();
+  }
+  std::string_view name;
+  if (lex->matchPeekToken(Token::IDENTIFIER)) {
+    name = lex->nextToken();
+  }
+  return error("unimplemented");
 }
 
 ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
@@ -766,36 +753,26 @@ ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
     if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
       do {
         auto expr = parseExpression();
-        if (!expr) {
-          return error("Expected expresssion in function arguments");
-        }
+        P_AST_EXPECT(expr, "expression");
         call->args.push_back(expr.moveRes());
       } while (lex->matchNextToken(Token::PUNCT_COMMA));
     }
-    if (!lex->matchNextToken(Token::PUNCT_PARENC)) {
-      return error("Expected closing paren for function call");
-    }
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     res = std::move(call);
     break;
   }
   case Token::PUNCT_SQUAREO: {
     lex->dropToken();
     auto expr = parseExpression();
-    if (!expr) {
-      return error("Expected expression for array access");
-    }
-    if (!lex->matchNextToken(Token::PUNCT_SQUAREC)) {
-      return error("Expected closing bracket for array access");
-    }
+    P_AST_EXPECT(expr, "expression");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SQUAREC);
     res = std::make_unique<ArrAccessAST>(std::move(base), expr.moveRes());
     break;
   }
   case Token::PUNCT_DOT:
   case Token::PUNCT_ARROW: {
     lex->dropToken();
-    if (!lex->matchPeekToken(Token::IDENTIFIER)) {
-      return error("Expected identifer for member access");
-    }
+    P_TOK_EXPECT_PEEK(Token::IDENTIFIER);
     res = std::make_unique<MemberAccessAST>(tokKind == Token::PUNCT_ARROW
                                                 ? AST::ACCESS_MEMBER_DEREF
                                                 : AST::ACCESS_MEMBER,
@@ -819,6 +796,7 @@ ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
 ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
                                           bool enableTypeQuali,
                                           bool enableStorageSpec) {
+  P_ERR_CTX(ErrCtx::DECL_SPEC);
   bool isNop = true;
   Type::Qualifier qualifier = Type::Qualifier();
   Symbol::Kind storageKind = Symbol::EMPTY;
@@ -855,9 +833,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
           return error("Specified multiple struct types");
         }
         auto tyRes = parseStruct();
-        if (!tyRes) {
-          return error("Expected struct/union");
-        }
+        P_AST_EXPECT(tyRes, "struct/union");
         structType = tyRes.moveRes();
         break;
       } else {
@@ -947,4 +923,48 @@ done:
   return DeclSpec(storageKind, std::move(type), qualifier);
 }
 
+void Parser::printErrCtx(std::ostream &os) {
+  for (auto e : log.trace | std::views::reverse) {
+    os << "... while parsing " << errCtxMsg(e) << "\n";
+  }
+}
+
+const char *Parser::errCtxMsg(ErrCtx ctx) {
+  switch (ctx) {
+  case ErrCtx::EXPRESSION:
+    return "expression";
+  case ErrCtx::DECLARATOR:
+    return "declarator";
+  case ErrCtx::DECLARATION:
+    return "declaration";
+  case ErrCtx::DECL_SPEC:
+    return "declaration specifiers";
+  case ErrCtx::STRUCT:
+    return "struct";
+  case ErrCtx::FUNC_DEF:
+    return "function definition";
+  case ErrCtx::ST_IF:
+    return "if statement";
+  case ErrCtx::ST_FOR:
+    return "for loop";
+  case ErrCtx::ST_WHILE:
+    return "while loop";
+  case ErrCtx::ST_EXPRESSION:
+    return "expression statement";
+  }
+  return "unknown";
+}
+
+ASTError Parser::errorExpectedToken(Token::Kind expectedKind, Token tok) {
+  log.freeze();
+
+  if (tok.isEmpty()) {
+    tok = lex->peekToken();
+  }
+
+  std::cerr << "[Error][Parser] Expected " << Token::kindName(expectedKind)
+            << " token, but got " << tok << '\n';
+
+  return ASTError(ASTError::EXPECTED_TOKEN);
+}
 } // namespace c
