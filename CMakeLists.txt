@@ -9,6 +9,8 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   set(CMAKE_C_STANDARD 11)
   include(CTest)
 
+  add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function)
+
   add_compile_options($<$<CONFIG:Debug>:-fsanitize=address>)
   add_link_options($<$<CONFIG:Debug>:-fsanitize=address>)
 endif()

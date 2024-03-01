@@ -41,6 +41,8 @@ public:
       return {4, Alignment(2)};
     case Type::QUALIFIED:
       return getSizeAndAlignment(as<QualifiedType>(type).getBaseType());
+    case Type::ENUM:
+      return getSizeAndAlignment(as<EnumType>(type).getBaseType());
     default:
       UNREACHABLE("Invalid type");
       break;

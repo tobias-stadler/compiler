@@ -3,7 +3,7 @@
 #include "c/ASTVisitor.h"
 #include "c/Type.h"
 
-#include <unordered_set>
+#include <unordered_map>
 
 namespace c {
 
@@ -165,6 +165,9 @@ public:
     case Symbol::REGISTER:
       std::cout << "register";
       break;
+    case Symbol::CONSTEXPR:
+      std::cout << "constexpr";
+      break;
     }
   }
 
@@ -250,6 +253,9 @@ public:
     case Type::ARR:
       std::cout << "array";
       break;
+    case Type::UNION:
+      std::cout << "union ";
+      [[fallthrough]];
     case Type::STRUCT:
       printStructType(as<StructType>(*type));
       break;
@@ -259,19 +265,58 @@ public:
       printType(&qTy.getBaseType());
       break;
     }
+    case Type::ENUM: {
+      printEnumType(as<EnumType>(*type));
+      break;
+    }
     default:
-      std::cout << "unnamed";
+      std::cout << "unknown";
       break;
     }
   }
 
-  void printStructType(StructType &type) {
-    auto [_, succ] = seenTypes.insert(&type);
+  void printSymbol(Symbol &sym) {
+    printSymbolKind(sym.getKind());
+    std::cout << " symbol ";
+    std::cout << sym.getName();
+    std::cout << " is ";
+    printType(sym.type);
+    if (sym.ast) {
+      std::cout << " = ";
+      dispatch(*sym.ast);
+    }
+  }
+
+  std::pair<size_t, bool> declareType(Type &type) {
+    auto [it, succ] = seenTypes.insert({&type, 0});
     if (!succ) {
-      std::cout << "...";
+      return {it->second, false};
+    }
+    it->second = seenTypesIdx++;
+    return {it->second, true};
+  }
+
+  void printEnumType(EnumType &type) {
+    auto [id, succ] = declareType(type);
+    std::cout << "enum#" << id;
+    if (!succ) {
       return;
     }
-    std::cout << "struct {";
+    std::cout << " {\n";
+    for (auto *s : type.members) {
+      printSymbol(*s);
+      std::cout << ",\n";
+    }
+    std::cout << "}";
+  }
+
+  void printStructType(StructType &type) {
+    auto [id, succ] = declareType(type);
+    std::cout << "struct#" << id;
+    if (!succ) {
+      return;
+    }
+    std::cout << " {";
     for (auto &subType : type.members) {
       std::cout << "\n";
       printType(subType);
@@ -282,7 +327,8 @@ public:
   }
 
 private:
-  std::unordered_set<Type *> seenTypes;
+  std::unordered_map<Type *, size_t> seenTypes;
+  size_t seenTypesIdx = 0;
 };
 } // namespace
 

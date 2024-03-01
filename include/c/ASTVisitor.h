@@ -50,6 +50,7 @@ public:
     case AST::GT:
     case AST::LTE:
     case AST::GTE:
+    case AST::COMMA:
       VISIT_DELEGATE(Binop);
       break;
     case AST::INC_PRE:

@@ -109,6 +109,8 @@ constexpr AST::Kind tokenBinopKind(Token::Kind kind) {
     return AST::LTE;
   case Token::PUNCT_GTEQ:
     return AST::GTE;
+  case Token::PUNCT_COMMA:
+    return AST::COMMA;
   }
 }
 
@@ -176,6 +178,8 @@ constexpr int binopPrecedence(AST::Kind kind) {
   case AST::ASSIGN_OR:
   case AST::ASSIGN_XOR:
     return 1;
+  case AST::COMMA:
+    return 0;
   default:
     return -1;
   }
@@ -687,20 +691,24 @@ ASTResult<Type *> Parser::parseStruct() {
   }
   lex->dropToken();
   std::string_view name;
-  StructType *res;
+  Type *res = nullptr;
   if (lex->matchPeekToken(Token::IDENTIFIER)) {
     name = lex->nextToken();
     if (auto *s = sym->getSymbol(name, Symbol::Namespace::TAG)) {
-      res = as<StructType>(&s->getType());
+      res = &s->getType();
       if (!((isUnion && res->getKind() == Type::UNION) ||
             (isStruct && res->getKind() == Type::STRUCT) ||
-            isEnum && res->getKind() == Type::ENUM)) {
-        return error("Redeclared tag with different specifier");
+            (isEnum && res->getKind() == Type::ENUM))) {
+        return error("Redeclared tag with different type");
       }
     }
   }
   if (!res) {
-    res = &ctx.make_type<StructType>(isUnion);
+    if (isEnum) {
+      res = &ctx.make_type<EnumType>(&ctx.make_type<BasicType>(Type::SINT));
+    } else {
+      res = &ctx.make_type<StructType>(isUnion);
+    }
     if (!name.empty()) {
       sym->declareSymbol(
           Symbol(Symbol::TYPEDEF, res, name, Symbol::Namespace::TAG));
@@ -713,22 +721,58 @@ ASTResult<Type *> Parser::parseStruct() {
     return res;
   }
   if (res->isComplete()) {
-    return error("Struct is already complete");
+    return error("Tagged type is already complete");
   }
 
-  while (true) {
-    auto spec = parseDeclSpec(true, true, false);
-    P_AST_EXPECT_OR_NOP(spec);
-    if (!spec) {
-      break;
-    }
+  if (isEnum) {
+    auto &enumTy = as<EnumType>(*res);
+    std::string_view oldValName;
     do {
-      auto decl = parseDeclarator(false);
-      P_AST_EXPECT(decl, "declarator");
-      decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
-      res->addNamedMember(decl->ident, *decl->type);
+      if (!lex->matchPeekToken(Token::IDENTIFIER)) {
+        break;
+      }
+      std::string_view valName = lex->nextToken();
+      AST::Ptr init = nullptr;
+      if (lex->matchNextToken(Token::PUNCT_EQ)) {
+        auto expr = parseExpression(1);
+        P_AST_EXPECT(expr, "initializer expression");
+        init = expr.moveRes();
+      } else {
+        if (oldValName.empty()) {
+          init = std::make_unique<NumAST>(0);
+        } else {
+          init = std::make_unique<BinopAST>(
+              AST::ADD, std::make_unique<VarAST>(oldValName),
+              std::make_unique<NumAST>(1));
+        }
+      }
+      auto *s =
+          sym->declareSymbol(Symbol(std::move(init), &enumTy.getBaseType(),
+                                    valName, Symbol::Namespace::ORDINARY));
+      if (!s) {
+        return error("Enum member identifer redeclares another symbol");
+      }
+      enumTy.members.push_back(s);
+      oldValName = valName;
     } while (lex->matchNextToken(Token::PUNCT_COMMA));
-    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
+  } else {
+    while (true) {
+      auto spec = parseDeclSpec(true, true, false);
+      P_AST_EXPECT_OR_NOP(spec);
+      if (!spec) {
+        break;
+      }
+      do {
+        auto decl = parseDeclarator(false);
+        P_AST_EXPECT(decl, "declarator");
+        decl->spliceEnd(DeclaratorAST(spec->type, nullptr));
+        if (!decl->type->isComplete()) {
+          return error("Illegal incomplete type");
+        }
+        as<StructType>(*res).addNamedMember(decl->ident, *decl->type);
+      } while (lex->matchNextToken(Token::PUNCT_COMMA));
+      P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
+    }
   }
 
   res->setComplete(true);
@@ -745,7 +789,7 @@ ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
     auto call = std::make_unique<FunctionCallAST>(std::move(base));
     if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
       do {
-        auto expr = parseExpression();
+        auto expr = parseExpression(1);
         P_AST_EXPECT(expr, "expression");
         call->args.push_back(expr.moveRes());
       } while (lex->matchNextToken(Token::PUNCT_COMMA));
@@ -949,7 +993,7 @@ const char *Parser::errCtxMsg(ErrCtx errCtx) {
   case ErrCtx::DECL_SPEC:
     return "declaration specifiers";
   case ErrCtx::STRUCT:
-    return "struct";
+    return "struct/union/enum";
   case ErrCtx::FUNC_DEF:
     return "function definition";
   case ErrCtx::ST_IF:
@@ -960,8 +1004,6 @@ const char *Parser::errCtxMsg(ErrCtx errCtx) {
     return "while loop";
   case ErrCtx::ST_EXPRESSION:
     return "expression statement";
-  case ErrCtx::ENUM:
-    return "enum";
   case ErrCtx::FUNC_PARAMS:
     return "function parameters";
   }

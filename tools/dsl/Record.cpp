@@ -171,7 +171,7 @@ Record *RecordSpace::lookupIdent(const RecordIdent &ident) {
     return nullptr;
   }
   Record *rec = lookupRecord(ident.idents[0]);
-  for (int i = 1; i < ident.idents.size(); ++i) {
+  for (size_t i = 1; i < ident.idents.size(); ++i) {
     RecordSpace *rs = dynamic_cast<RecordSpace *>(rec);
     if (!rs) {
       return nullptr;

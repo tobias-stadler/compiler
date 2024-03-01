@@ -19,7 +19,10 @@ public:
   enum class StorageDuration { STATIC, THREAD, AUTOMATIC, ALLOCATED, NONE };
   enum class Namespace { ORDINARY, LABEL, TAG, MEMBER };
   Symbol(Kind kind, Type *type, std::string_view name, Namespace ns)
-      : kind(kind), type(std::move(type)), name(name), ns(ns) {}
+      : kind(kind), ns(ns), name(name), type(type) {}
+  Symbol(std::unique_ptr<AST> ast, Type *type, std::string_view name,
+         Namespace ns)
+      : kind(CONSTEXPR), ns(ns), name(name), type(type), ast(std::move(ast)) {}
 
   Kind getKind() const { return kind; }
 
@@ -27,6 +30,13 @@ public:
     assert(type);
     return *type;
   }
+
+  AST &getAST() {
+    assert(ast);
+    return *ast;
+  }
+
+  void setType(Type *ty) { type = ty; }
 
   SymbolId getId() const { return id; }
 
@@ -64,11 +74,13 @@ public:
 private:
   Kind kind;
   Namespace ns;
-  Type *type;
-  std::unique_ptr<AST> ast;
   SymbolId id = 0;
   std::string_view name;
   bool addrTaken = false;
+
+public:
+  Type *type = nullptr;
+  std::unique_ptr<AST> ast = nullptr;
 };
 
 class Scope {
@@ -143,6 +155,7 @@ public:
     assert(n < scopes.size());
     return *scopes[n];
   }
+  enum bruh {};
 
   void clearScopeStack() { scopes.clear(); }
 

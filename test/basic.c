@@ -7,7 +7,12 @@ struct goofy {
   int y;
   struct goofy *p;
 };
-typedef int gt;
+typedef enum {
+  A,
+  ASDF = 3,
+  B,
+  C
+} b;
 
 int main() {
   int x, y, z;
@@ -19,6 +24,8 @@ int main() {
   *p = do_sth(x, y);
 
   struct goofy *(*gf)(int);
+
+  b bv;
 
   struct goofy s;
   s.x = 69;

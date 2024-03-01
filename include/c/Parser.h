@@ -34,7 +34,6 @@ public:
     DECLARATION,
     DECL_SPEC,
     STRUCT,
-    ENUM,
     FUNC_DEF,
     FUNC_PARAMS,
     ST_EXPRESSION,
@@ -58,7 +57,7 @@ public:
 
   ASTPtrResult parseStatement();
 
-  ASTPtrResult parseExpression(int prec = 1);
+  ASTPtrResult parseExpression(int prec = 0);
 
   ASTPtrResult parseUnary();
   ASTPtrResult parsePostfix(AST::Ptr base);

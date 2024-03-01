@@ -138,7 +138,7 @@ class PrintRegTrackingPass : public IRPass<Function> {
     auto &regTrack = info.query<RegTracking>();
 
     std::cout << "-- RegTracking --\n";
-    for (int i = 0; i < regTrack.vRegs.size(); ++i) {
+    for (size_t i = 0; i < regTrack.vRegs.size(); ++i) {
       auto &reg = regTrack.vRegs[i];
       std::cout << (i + regTrack.firstVReg) << ": ";
       if (reg.ssaDef) {

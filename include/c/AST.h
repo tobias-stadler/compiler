@@ -57,6 +57,7 @@ public:
     ASSIGN_XOR,
     ASSIGN_LSHIFT,
     ASSIGN_RSHIFT,
+    COMMA,
     PLUS,
     MINUS,
     ADD,
@@ -220,6 +221,8 @@ public:
       return "return";
     case ST_FOR:
       return "for";
+    case COMMA:
+      return "Comma";
     }
     return "unnamed";
   }
@@ -262,7 +265,7 @@ public:
 class MemberAccessAST : public AST {
 public:
   MemberAccessAST(Kind kind, Ptr child, std::string_view ident)
-      : AST(kind), child(std::move(child)), ident(ident) {}
+      : AST(kind), ident(ident), child(std::move(child)) {}
   std::string_view ident;
   Ptr child;
 };

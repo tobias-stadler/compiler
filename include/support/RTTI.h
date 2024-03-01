@@ -3,7 +3,7 @@
 #include <cassert>
 
 template <typename T, typename U> T *as(U *ptr) {
-  assert(!ptr || T::is_impl(*ptr) && "Illegal cast");
+  assert((!ptr || T::is_impl(*ptr)) && "Illegal cast");
   return static_cast<T *>(ptr);
 }
 template <typename T, typename U> T &as(U &ref) {

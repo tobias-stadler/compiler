@@ -277,11 +277,15 @@ private:
   std::unordered_map<std::string_view, size_t> memberIndex;
 };
 
+class Symbol;
+
 class EnumType : public DerivedType {
 public:
   static bool is_impl(const Type &o) { return o.getKind() == ENUM; }
 
   EnumType(Type *baseType) : DerivedType(ENUM, baseType, false) {}
+
+  std::vector<Symbol *> members;
 };
 
 } // namespace c
