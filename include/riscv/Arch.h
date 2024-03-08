@@ -250,7 +250,7 @@ class FrameLoweringPass : public IRPass<Function> {
         Instr &instr = use.getParent();
         size_t frameOffset = frameOffsets[frameEntry.getId()];
         switch (instr.getKind()) {
-        case Instr::REF_OTHERSSADEF: {
+        case Instr::REF_EXTERN: {
           Instr &i = InstrBuilder(instr).emitInstr(ADDI, 3);
           i.emplaceOperand<Operand::REG_DEF>(instr.getOperand(0).reg());
           i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
@@ -360,17 +360,18 @@ public:
     case Operand::EMPTY:
       break;
     case Operand::SSA_DEF_TYPE:
-    case Operand::SSA_DEF_OTHER:
+    case Operand::SSA_DEF_EXTERN:
     case Operand::TYPE:
     case Operand::BLOCK:
     case Operand::BRCOND:
     case Operand::CHAIN:
+    case Operand::MINT:
       assert(false && "Illegal operand");
       break;
     case Operand::SSA_USE: {
       Operand &def = op.ssaUse().getDef();
-      if (def.getKind() == Operand::SSA_DEF_OTHER) {
-        printOtherSSADef(def.ssaDefOther());
+      if (def.getKind() == Operand::SSA_DEF_EXTERN) {
+        printExternSSADef(def.ssaDefOther());
         break;
       }
       assert(false && "Illegal operand");
@@ -393,7 +394,7 @@ public:
     }
   }
 
-  void printOtherSSADef(OtherSSADef &def) {
+  void printExternSSADef(ExternSSADef &def) {
     if (def.isGlobal()) {
       std::cout << def.global().getName();
     } else if (is<Block>(def)) {

@@ -8,6 +8,7 @@
 #include <array>
 #include <cassert>
 #include <charconv>
+#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -35,12 +36,12 @@
   }
 
 #define P_TOK_EXPECT_NEXT(x)                                                   \
-  if (!lex->matchNextToken(x)) [[unlikely]] {                                  \
+  if (!lex.matchNext(x)) [[unlikely]] {                                        \
     return errorExpectedToken(x);                                              \
   }
 
 #define P_TOK_EXPECT_PEEK(x)                                                   \
-  if (!lex->matchPeekToken(x)) [[unlikely]] {                                  \
+  if (!lex.matchPeek(x)) [[unlikely]] {                                        \
     return errorExpectedToken(x);                                              \
   }
 
@@ -137,35 +138,35 @@ constexpr AST::Kind tokenUnopKind(Token::Kind kind) {
   }
 }
 
-constexpr int binopPrecedence(AST::Kind kind) {
+constexpr Precedence binopPrecedence(AST::Kind kind) {
   switch (kind) {
   case AST::MUL:
   case AST::DIV:
-    return 12;
+    return Precedence::MUL;
   case AST::ADD:
   case AST::SUB:
-    return 11;
+    return Precedence::ADD;
   case AST::LSHIFT:
   case AST::RSHIFT:
-    return 10;
+    return Precedence::SHIFT;
   case AST::LT:
   case AST::GT:
   case AST::LTE:
   case AST::GTE:
-    return 9;
+    return Precedence::RELATIONAL;
   case AST::EQ:
   case AST::NEQ:
-    return 8;
+    return Precedence::EQUALITY;
   case AST::BIT_AND:
-    return 7;
+    return Precedence::BIT_AND;
   case AST::BIT_XOR:
-    return 6;
+    return Precedence::BIT_XOR;
   case AST::BIT_OR:
-    return 5;
+    return Precedence::BIT_OR;
   case AST::LOG_AND:
-    return 4;
+    return Precedence::LOG_AND;
   case AST::LOG_OR:
-    return 3;
+    return Precedence::LOG_OR;
   case AST::ASSIGN:
   case AST::ASSIGN_ADD:
   case AST::ASSIGN_SUB:
@@ -177,19 +178,19 @@ constexpr int binopPrecedence(AST::Kind kind) {
   case AST::ASSIGN_AND:
   case AST::ASSIGN_OR:
   case AST::ASSIGN_XOR:
-    return 1;
+    return Precedence::ASSIGN;
   case AST::COMMA:
-    return 0;
+    return Precedence::COMMA;
   default:
-    return -1;
+    return Precedence::NONE;
   }
 }
 
-constexpr bool precedenceRightAssoc(int prec) {
+constexpr bool precedenceRightAssoc(Precedence prec) {
   switch (prec) {
   default:
     return false;
-  case 1:
+  case Precedence::ASSIGN:
     return true;
   }
 }
@@ -248,12 +249,44 @@ auto typeSpecSets = getTypeSpecSets();
 
 } // namespace
 
+ASTResult<Type *> Parser::parseTypeName() {
+  auto tyRes = parseDeclSpec(true, true, false);
+  P_AST_EXPECT_FWD(tyRes);
+  auto decl = parseDeclarator(true);
+  P_AST_EXPECT_OR_NOP(decl);
+  if (!decl) {
+    return tyRes->type;
+  }
+  if (!decl->ident.empty()) {
+    return error("Illegal identifer in abstract declarator");
+  }
+  decl->spliceEnd(DeclaratorAST(tyRes->type, nullptr));
+  return decl->type;
+}
+
 ASTPtrResult Parser::parseUnary() {
-  Token::Kind tokKind = lex->peekTokenKind();
+  Token::Kind tokKind = lex.peekKind();
   AST::Ptr res;
   switch (tokKind) {
   case Token::PUNCT_PARENO: {
-    lex->dropToken();
+    lex.drop();
+    auto tyRes = parseTypeName();
+    P_AST_EXPECT_OR_NOP(tyRes);
+    if (tyRes) {
+      // Type cast
+      P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
+      if (lex.matchPeek(Token::PUNCT_CURLYO)) {
+        // Compound literal
+        auto initRes = parseInitializerList();
+        P_AST_EXPECT(initRes, "compund literal initializer");
+        res = std::make_unique<CastAST>(initRes.moveRes(), tyRes.res());
+        break;
+      }
+      auto subExpr = parseUnary();
+      P_AST_EXPECT(subExpr, "unary expression after cast operator");
+      res = std::make_unique<CastAST>(subExpr.moveRes(), tyRes.res());
+      break;
+    }
     auto ex = parseExpression();
     P_AST_EXPECT(ex, "expression");
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
@@ -261,10 +294,10 @@ ASTPtrResult Parser::parseUnary() {
     break;
   }
   case Token::IDENTIFIER: {
-    res = std::make_unique<VarAST>(std::string_view(lex->nextToken()));
+    res = std::make_unique<VarAST>(std::string_view(lex.next()));
     break;
   }
-  case Token::LITERAL_NUM:
+  case Token::PP_NUM:
     res = parseLiteralNum();
     break;
   default: {
@@ -272,12 +305,12 @@ ASTPtrResult Parser::parseUnary() {
     if (unopKind == AST::EMPTY) {
       return nop();
     }
-    lex->dropToken();
+    lex.drop();
     auto subExpr = parseUnary();
-    P_AST_EXPECT(subExpr, "expression after unary operator");
+    P_AST_EXPECT(subExpr, "unary expression after unary operator");
     if (unopKind == AST::ADDR && (*subExpr)->getKind() == AST::VAR) {
-      auto *s = sym->getSymbol(static_cast<VarAST &>(*subExpr->get()).ident,
-                               Symbol::Namespace::ORDINARY);
+      auto *s = sym.getSymbol(static_cast<VarAST &>(*subExpr->get()).ident,
+                              Symbol::Namespace::ORDINARY);
       if (s) {
         s->setAddrTaken(true);
       }
@@ -289,26 +322,40 @@ ASTPtrResult Parser::parseUnary() {
   return parsePostfix(std::move(res));
 }
 
-ASTPtrResult Parser::parseExpression(int prec) {
+ASTPtrResult Parser::parseExpression(Precedence prec) {
+  int precVal = static_cast<int>(prec);
   auto lhs = parseUnary();
   P_AST_EXPECT_FWD(lhs);
   while (true) {
-    Token::Kind tokKind = lex->peekTokenKind();
+    Token::Kind tokKind = lex.peekKind();
+    if (tokKind == Token::PUNCT_QUESTION &&
+        precVal <= static_cast<int>(Precedence::TERNARY)) {
+      // Ternary
+      lex.drop();
+      auto ternaryLhs = parseExpression();
+      P_AST_EXPECT(ternaryLhs, "lhs of ternary expression");
+      P_TOK_EXPECT_NEXT(Token::PUNCT_COLON);
+      auto ternaryRhs = parseExpression(Precedence::TERNARY);
+      P_AST_EXPECT(ternaryRhs, "rhs of ternary expression");
+      return std::make_unique<TernaryAST>(lhs, ternaryLhs, ternaryRhs);
+    }
     AST::Kind binopKind = tokenBinopKind(tokKind);
-    int tokPrec = binopPrecedence(binopKind);
-    if (binopKind == AST::EMPTY || tokPrec < prec) {
+    Precedence tokPrec = binopPrecedence(binopKind);
+    if (binopKind == AST::EMPTY || static_cast<int>(tokPrec) < precVal) {
       return lhs;
     }
-    lex->dropToken();
-    auto rhs =
-        parseExpression(precedenceRightAssoc(tokPrec) ? tokPrec : tokPrec + 1);
+    lex.drop();
+    auto rhs = parseExpression(
+        precedenceRightAssoc(tokPrec)
+            ? tokPrec
+            : static_cast<Precedence>(static_cast<int>(tokPrec) + 1));
     P_AST_EXPECT(rhs, "expression");
     lhs = new BinopAST(binopKind, lhs, rhs);
   }
 }
 
 ASTPtrResult Parser::parseStatement() {
-  Token::Kind tokKind = lex->peekTokenKind();
+  Token::Kind tokKind = lex.peekKind();
   switch (tokKind) {
   case Token::PUNCT_SEMICOLON: {
     return error("Stray semicolon");
@@ -316,16 +363,39 @@ ASTPtrResult Parser::parseStatement() {
   case Token::PUNCT_CURLYO: {
     return parseCompoundStatement();
   }
+  case Token::KEYWORD_GOTO: {
+    lex.drop();
+    P_TOK_EXPECT_PEEK(Token::IDENTIFIER);
+    std::string_view ident = lex.next();
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
+    return std::make_unique<GotoStAST>(ident);
+  }
+  case Token::KEYWORD_CASE: {
+    lex.drop();
+    auto exprRes = parseExpression();
+    P_AST_EXPECT(exprRes, "expression in case label");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_COLON);
+    auto stRes = parseStatement();
+    P_AST_EXPECT(stRes, "statement after case label");
+    return std::make_unique<LabelStAST>(stRes.moveRes(), exprRes.moveRes());
+  }
+  case Token::KEYWORD_DEFAULT: {
+    lex.drop();
+    P_TOK_EXPECT_NEXT(Token::PUNCT_COLON);
+    auto stRes = parseStatement();
+    P_AST_EXPECT(stRes, "statement after default label");
+    return std::make_unique<LabelStAST>(stRes.moveRes());
+  }
   case Token::KEYWORD_IF: {
     P_ERR_CTX(ErrCtx::ST_IF);
-    lex->dropToken();
+    lex.drop();
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
     auto expr = parseExpression();
     P_AST_EXPECT(expr, "condition expression");
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     auto st = parseStatement();
     P_AST_EXPECT(st, "statement");
-    if (lex->matchNextToken(Token::KEYWORD_ELSE)) {
+    if (lex.matchNext(Token::KEYWORD_ELSE)) {
       auto stElse = parseStatement();
       P_AST_EXPECT(stElse, "else statement");
       return new IfStAST(expr, st, stElse);
@@ -334,18 +404,31 @@ ASTPtrResult Parser::parseStatement() {
   }
   case Token::KEYWORD_WHILE: {
     P_ERR_CTX(ErrCtx::ST_WHILE);
-    lex->dropToken();
+    lex.drop();
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
     auto expr = parseExpression();
     P_AST_EXPECT(expr, "condition expression");
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     auto st = parseStatement();
     P_AST_EXPECT(st, "statement");
-    return new WhileStAST(expr, st);
+    return new WhileStAST(AST::ST_WHILE, expr, st);
+  }
+  case Token::KEYWORD_DO: {
+    P_ERR_CTX(ErrCtx::ST_WHILE);
+    lex.drop();
+    auto st = parseStatement();
+    P_AST_EXPECT(st, "statement");
+    P_TOK_EXPECT_NEXT(Token::KEYWORD_WHILE);
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
+    auto expr = parseExpression();
+    P_AST_EXPECT(expr, "condition expression");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
+    P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
+    return new WhileStAST(AST::ST_DO_WHILE, expr, st);
   }
   case Token::KEYWORD_FOR: {
     P_ERR_CTX(ErrCtx::ST_FOR);
-    lex->dropToken();
+    lex.drop();
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
     auto initClauseRes = parseDeclaration();
     AST::Ptr initClause = nullptr;
@@ -383,14 +466,14 @@ ASTPtrResult Parser::parseStatement() {
   }
   case Token::KEYWORD_CONTINUE:
   case Token::KEYWORD_BREAK: {
-    lex->dropToken();
+    lex.drop();
     P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return std::make_unique<LoopCtrlStAST>(
         tokKind == Token::KEYWORD_CONTINUE ? AST::ST_CONTINUE : AST::ST_BREAK);
   }
 
   case Token::KEYWORD_RETURN: {
-    lex->dropToken();
+    lex.drop();
     auto exprRes = parseExpression();
     P_AST_EXPECT_OR_NOP(exprRes);
     AST::Ptr expr = nullptr;
@@ -400,10 +483,28 @@ ASTPtrResult Parser::parseStatement() {
     P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return std::make_unique<ReturnStAST>(std::move(expr));
   }
+  case Token::KEYWORD_SWITCH: {
+    lex.drop();
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENO);
+    auto exprRes = parseExpression();
+    P_AST_EXPECT(exprRes, "expression for switch");
+    P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
+    auto stRes = parseStatement();
+    P_AST_EXPECT(stRes, "statement for switch");
+    return std::make_unique<SwitchStAST>(exprRes.moveRes(), stRes.moveRes());
+  }
   default: {
     P_ERR_CTX(ErrCtx::ST_EXPRESSION);
-    auto st = parseExpression();
-    P_AST_EXPECT_FWD(st);
+    auto exprRes = parseExpression();
+    P_AST_EXPECT_FWD(exprRes);
+    auto st = exprRes.moveRes();
+    if (st->getKind() == AST::VAR && lex.matchNext(Token::PUNCT_COLON)) {
+      // Label disambiguation
+      auto labelName = static_cast<VarAST &>(*st).ident;
+      auto stRes = parseStatement();
+      P_AST_EXPECT(stRes, "statement after label");
+      return std::make_unique<LabelStAST>(stRes.moveRes(), labelName);
+    }
     P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return st;
   }
@@ -417,24 +518,22 @@ ASTError Parser::error(std::string_view str) {
 }
 
 ASTPtrResult Parser::parseLiteralNum() {
-  Token tok = lex->nextToken();
-  if (tok.kind != Token::LITERAL_NUM) {
-    return errorExpectedToken(Token::LITERAL_NUM, tok);
-  }
+  P_TOK_EXPECT_PEEK(Token::PP_NUM);
+  Token tok = lex.next();
   std::string_view str(tok);
-  int64_t num;
+  uint64_t num;
   auto res = std::from_chars(str.data(), str.data() + str.size(), num);
   if (res.ec != std::errc{}) {
     return error("Invalid num");
   }
-  return new NumAST(num);
+  return new IntConstAST(MInt{32, num}, &ctx.make_type<BasicType>(Type::SINT));
 }
 
 ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
                                                              bool first) {
-  switch (lex->peekTokenKind()) {
+  switch (lex.peekKind()) {
   case Token::PUNCT_PARENO: {
-    lex->dropToken();
+    lex.drop();
     if (abstract ? nextIsAbstractDeclarator() : first) {
       auto decl = parseDeclarator(abstract);
       P_AST_EXPECT(decl, "declarator");
@@ -443,7 +542,7 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
     } else {
       P_ERR_CTX(ErrCtx::FUNC_PARAMS);
       auto *func = &ctx.make_type<FuncType>();
-      if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
+      if (!lex.matchPeek(Token::PUNCT_PARENC)) {
         do {
           auto spec = parseDeclSpec(true, true, false);
           P_AST_EXPECT(spec, "declaration specifiers");
@@ -460,14 +559,14 @@ ASTResult<DeclaratorAST> Parser::parseSingleDirectDeclarator(bool abstract,
           } else {
             func->addParam(*spec->type);
           }
-        } while (lex->matchNextToken(Token::PUNCT_COMMA));
+        } while (lex.matchNext(Token::PUNCT_COMMA));
       }
       P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
       return DeclaratorAST(func);
     }
   }
   case Token::IDENTIFIER: {
-    return DeclaratorAST(nullptr, nullptr, std::string_view(lex->nextToken()));
+    return DeclaratorAST(nullptr, nullptr, std::string_view(lex.next()));
   }
   default:
     return nop();
@@ -495,24 +594,60 @@ ASTResult<DeclaratorAST> Parser::parseDirectDeclarator(bool abstract) {
 
 ASTResult<DeclaratorAST> Parser::parseDeclarator(bool abstract) {
   P_ERR_CTX(ErrCtx::DECLARATOR);
-  switch (lex->peekTokenKind()) {
+  switch (lex.peekKind()) {
   case Token::PUNCT_STAR: {
-    lex->dropToken();
+    lex.drop();
     DerivedType *ty = &ctx.make_type<PtrType>(nullptr);
     auto spec = parseDeclSpec(false, true, false);
     P_AST_EXPECT_OR_NOP(spec);
     if (spec) {
       ty = &ctx.make_type<QualifiedType>(ty, spec->qualifier);
     }
-
     auto decl = parseDeclarator(abstract);
-    P_AST_EXPECT(decl, "declarator after pointer-declarator");
+    if (abstract) {
+      P_AST_EXPECT_OR_NOP(decl);
+    } else {
+      P_AST_EXPECT(decl, "declarator after pointer-declarator");
+    }
+    if (!decl) {
+      return DeclaratorAST(ty);
+    }
     decl->spliceEnd(DeclaratorAST(ty));
     return decl;
   }
   default:
     return parseDirectDeclarator(abstract);
   }
+}
+
+ASTPtrResult Parser::parseInitializerList() {
+  P_TOK_EXPECT_NEXT(Token::PUNCT_CURLYO);
+  auto res = std::make_unique<InitializerListAST>();
+  do {
+    if (lex.matchPeek(Token::PUNCT_CURLYC)) {
+      break;
+    }
+    auto &entry = res->entries.emplace_back();
+    if (lex.matchPeek(Token::PUNCT_SQUAREO) ||
+        lex.matchPeek(Token::PUNCT_DOT)) {
+      auto designation = parsePostfix(nullptr);
+      P_AST_EXPECT(designation, "designation");
+      entry.designation = designation.moveRes();
+      P_TOK_EXPECT_NEXT(Token::PUNCT_EQ);
+    }
+    auto initRes = parseInitializer();
+    P_AST_EXPECT(initRes, "initializer");
+    entry.initializer = initRes.moveRes();
+  } while (lex.matchNext(Token::PUNCT_COMMA));
+  P_TOK_EXPECT_NEXT(Token::PUNCT_CURLYC);
+  return res;
+}
+
+ASTPtrResult Parser::parseInitializer() {
+  if (lex.matchPeek(Token::PUNCT_CURLYO)) {
+    return parseInitializerList();
+  }
+  return parseExpression(Precedence::ASSIGN);
 }
 
 ASTPtrResult Parser::parseDeclaration() {
@@ -531,7 +666,7 @@ ASTPtrResult Parser::parseDeclaration() {
   if (nextIsDeclarationList()) {
     P_ERR_CTX(ErrCtx::FUNC_DEF);
     // Parsing function definition
-    if (!sym->scope().isFile()) {
+    if (!sym.scope().isFile()) {
       return error("Function definition only allowed in file scope");
     }
     if (decl->type->getKind() != Type::FUNC) {
@@ -540,29 +675,29 @@ ASTPtrResult Parser::parseDeclaration() {
 
     auto ast = std::make_unique<FunctionDefinitionAST>(spec->symbolKind,
                                                        decl.moveRes());
-    Symbol::Kind symbolKind = sym->scope().getSymbolKind(ast->symbolKind);
+    Symbol::Kind symbolKind = sym.scope().getSymbolKind(ast->symbolKind);
 
     if (!(symbolKind == Symbol::EXTERN || symbolKind == Symbol::STATIC)) {
       return error("Invalid storage class for function");
     }
-    auto *s = sym->declareSymbol(Symbol(symbolKind, ast->decl.type, decl->ident,
-                                        Symbol::Namespace::ORDINARY));
+    auto *s = sym.declareSymbol(Symbol(symbolKind, ast->decl.type, decl->ident,
+                                       Symbol::Namespace::ORDINARY));
     // TODO: prototype support
     if (!s) {
       return error("Function redefined");
     }
 
-    sym->pushScope(ast->funcScope);
-    sym->pushScope(ast->blockScope);
+    sym.pushScope(ast->funcScope);
+    sym.pushScope(ast->blockScope);
     for (auto [ident, ty] : ast->getType().getParams()) {
-      sym->declareSymbol(
+      sym.declareSymbol(
           Symbol(Symbol::AUTO, ty, ident, Symbol::Namespace::ORDINARY));
     }
     auto st = parseCompoundStatement();
     P_AST_EXPECT(st, "compound statement for function definition");
     ast->st = st.moveRes();
-    sym->popScope();
-    sym->popScope();
+    sym.popScope();
+    sym.popScope();
 
     return ast;
   }
@@ -570,13 +705,13 @@ ASTPtrResult Parser::parseDeclaration() {
   auto ast = std::make_unique<DeclarationAST>(spec->symbolKind);
   while (true) {
     AST::Ptr initializer = nullptr;
-    if (lex->matchNextToken(Token::PUNCT_EQ)) {
-      auto expr = parseExpression();
-      P_AST_EXPECT(expr, "expression as initializer");
-      initializer = expr.moveRes();
+    if (lex.matchNext(Token::PUNCT_EQ)) {
+      auto initRes = parseInitializer();
+      P_AST_EXPECT(initRes, "initializer");
+      initializer = initRes.moveRes();
     }
     ast->declarators.emplace_back(decl.moveRes(), std::move(initializer));
-    if (!lex->matchNextToken(Token::PUNCT_COMMA)) {
+    if (!lex.matchNext(Token::PUNCT_COMMA)) {
       break;
     }
     decl = parseDeclarator(false);
@@ -586,11 +721,11 @@ ASTPtrResult Parser::parseDeclaration() {
 
   P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
 
-  Symbol::Kind symbolKind = sym->scope().getSymbolKind(ast->symbolKind);
+  Symbol::Kind symbolKind = sym.scope().getSymbolKind(ast->symbolKind);
   // TODO: verify symbolKind
 
   for (auto &[d, _] : ast->declarators) {
-    auto *s = sym->declareSymbol(
+    auto *s = sym.declareSymbol(
         Symbol(symbolKind, d.type, d.ident, Symbol::Namespace::ORDINARY));
     if (!s) {
       return error(std::string("Symbol redeclared: ") + std::string(d.ident));
@@ -601,7 +736,7 @@ ASTPtrResult Parser::parseDeclaration() {
 
 ASTResult<std::unique_ptr<TranslationUnitAST>> Parser::parseTranslationUnit() {
   auto tu = std::make_unique<TranslationUnitAST>();
-  sym->pushScope(tu->scope);
+  sym.pushScope(tu->scope);
   while (true) {
     auto declRes = parseDeclaration();
     P_AST_EXPECT_OR_NOP(declRes);
@@ -610,17 +745,17 @@ ASTResult<std::unique_ptr<TranslationUnitAST>> Parser::parseTranslationUnit() {
     }
     tu->declarations.push_back(declRes.moveRes());
   }
-  sym->popScope();
+  sym.popScope();
   return tu;
 }
 
 ASTPtrResult Parser::parseCompoundStatement() {
-  if (lex->peekTokenKind() != Token::PUNCT_CURLYO) {
+  if (lex.peekKind() != Token::PUNCT_CURLYO) {
     return nop();
   }
-  lex->dropToken();
+  lex.drop();
   auto st = std::make_unique<CompoundStAST>();
-  sym->pushScope(st->scope);
+  sym.pushScope(st->scope);
   while (true) {
     ASTPtrResult subSt = parseBlockItem();
     P_AST_EXPECT_OR_NOP(subSt);
@@ -630,7 +765,7 @@ ASTPtrResult Parser::parseCompoundStatement() {
     st->children.push_back(subSt);
   }
   P_TOK_EXPECT_NEXT(Token::PUNCT_CURLYC);
-  sym->popScope();
+  sym.popScope();
   return st;
 }
 
@@ -650,7 +785,7 @@ ASTPtrResult Parser::parseBlockItem() {
 }
 
 bool Parser::nextIsAbstractDeclarator() {
-  switch (lex->peekTokenKind()) {
+  switch (lex.peekKind()) {
   case Token::PUNCT_STAR:
   case Token::PUNCT_PARENO:
   case Token::PUNCT_SQUAREO:
@@ -661,7 +796,7 @@ bool Parser::nextIsAbstractDeclarator() {
 }
 
 bool Parser::nextIsDeclarationList() {
-  switch (lex->peekTokenKind()) {
+  switch (lex.peekKind()) {
   case Token::PUNCT_EQ:
   case Token::PUNCT_COMMA:
   case Token::PUNCT_SEMICOLON:
@@ -676,7 +811,7 @@ ASTResult<Type *> Parser::parseStruct() {
   bool isUnion = false;
   bool isStruct = false;
   bool isEnum = false;
-  switch (lex->peekTokenKind()) {
+  switch (lex.peekKind()) {
   case Token::KEYWORD_UNION:
     isUnion = true;
     break;
@@ -689,12 +824,12 @@ ASTResult<Type *> Parser::parseStruct() {
   default:
     return nop();
   }
-  lex->dropToken();
+  lex.drop();
   std::string_view name;
   Type *res = nullptr;
-  if (lex->matchPeekToken(Token::IDENTIFIER)) {
-    name = lex->nextToken();
-    if (auto *s = sym->getSymbol(name, Symbol::Namespace::TAG)) {
+  if (lex.matchPeek(Token::IDENTIFIER)) {
+    name = lex.next();
+    if (auto *s = sym.getSymbol(name, Symbol::Namespace::TAG)) {
       res = &s->getType();
       if (!((isUnion && res->getKind() == Type::UNION) ||
             (isStruct && res->getKind() == Type::STRUCT) ||
@@ -710,11 +845,11 @@ ASTResult<Type *> Parser::parseStruct() {
       res = &ctx.make_type<StructType>(isUnion);
     }
     if (!name.empty()) {
-      sym->declareSymbol(
+      sym.declareSymbol(
           Symbol(Symbol::TYPEDEF, res, name, Symbol::Namespace::TAG));
     }
   }
-  if (!lex->matchNextToken(Token::PUNCT_CURLYO)) {
+  if (!lex.matchNext(Token::PUNCT_CURLYO)) {
     if (name.empty()) {
       return error("Expected identifier or struct declaration list");
     }
@@ -725,36 +860,36 @@ ASTResult<Type *> Parser::parseStruct() {
   }
 
   if (isEnum) {
+    auto *enumConstTy = &ctx.make_type<BasicType>(Type::SINT);
     auto &enumTy = as<EnumType>(*res);
     std::string_view oldValName;
     do {
-      if (!lex->matchPeekToken(Token::IDENTIFIER)) {
+      if (!lex.matchPeek(Token::IDENTIFIER)) {
         break;
       }
-      std::string_view valName = lex->nextToken();
+      std::string_view valName = lex.next();
       AST::Ptr init = nullptr;
-      if (lex->matchNextToken(Token::PUNCT_EQ)) {
-        auto expr = parseExpression(1);
+      if (lex.matchNext(Token::PUNCT_EQ)) {
+        auto expr = parseExpression(Precedence::TERNARY);
         P_AST_EXPECT(expr, "initializer expression");
         init = expr.moveRes();
       } else {
         if (oldValName.empty()) {
-          init = std::make_unique<NumAST>(0);
+          init = std::make_unique<IntConstAST>(MInt::zero(32), enumConstTy);
         } else {
           init = std::make_unique<BinopAST>(
               AST::ADD, std::make_unique<VarAST>(oldValName),
-              std::make_unique<NumAST>(1));
+              std::make_unique<IntConstAST>(MInt::one(32), enumConstTy));
         }
       }
-      auto *s =
-          sym->declareSymbol(Symbol(std::move(init), &enumTy.getBaseType(),
-                                    valName, Symbol::Namespace::ORDINARY));
+      auto *s = sym.declareSymbol(Symbol(std::move(init), enumConstTy, valName,
+                                         Symbol::Namespace::ORDINARY));
       if (!s) {
         return error("Enum member identifer redeclares another symbol");
       }
       enumTy.members.push_back(s);
       oldValName = valName;
-    } while (lex->matchNextToken(Token::PUNCT_COMMA));
+    } while (lex.matchNext(Token::PUNCT_COMMA));
   } else {
     while (true) {
       auto spec = parseDeclSpec(true, true, false);
@@ -770,7 +905,7 @@ ASTResult<Type *> Parser::parseStruct() {
           return error("Illegal incomplete type");
         }
         as<StructType>(*res).addNamedMember(decl->ident, *decl->type);
-      } while (lex->matchNextToken(Token::PUNCT_COMMA));
+      } while (lex.matchNext(Token::PUNCT_COMMA));
       P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     }
   }
@@ -782,43 +917,45 @@ ASTResult<Type *> Parser::parseStruct() {
 
 ASTPtrResult Parser::parsePostfix(AST::Ptr base) {
   AST::Ptr res;
-  Token::Kind tokKind = lex->peekTokenKind();
+  Token::Kind tokKind = lex.peekKind();
   switch (tokKind) {
   case Token::PUNCT_PARENO: {
-    lex->dropToken();
+    lex.drop();
     auto call = std::make_unique<FunctionCallAST>(std::move(base));
-    if (!lex->matchPeekToken(Token::PUNCT_PARENC)) {
+    if (!lex.matchPeek(Token::PUNCT_PARENC)) {
       do {
-        auto expr = parseExpression(1);
+        auto expr = parseExpression(Precedence::ASSIGN);
         P_AST_EXPECT(expr, "expression");
         call->args.push_back(expr.moveRes());
-      } while (lex->matchNextToken(Token::PUNCT_COMMA));
+      } while (lex.matchNext(Token::PUNCT_COMMA));
     }
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     res = std::move(call);
     break;
   }
   case Token::PUNCT_SQUAREO: {
-    lex->dropToken();
+    lex.drop();
     auto expr = parseExpression();
     P_AST_EXPECT(expr, "expression");
     P_TOK_EXPECT_NEXT(Token::PUNCT_SQUAREC);
-    res = std::make_unique<ArrAccessAST>(std::move(base), expr.moveRes());
+    res = std::make_unique<UnopAST>(
+        AST::DEREF,
+        std::make_unique<BinopAST>(AST::ADD, std::move(base), expr.moveRes()));
     break;
   }
   case Token::PUNCT_DOT:
   case Token::PUNCT_ARROW: {
-    lex->dropToken();
+    lex.drop();
     P_TOK_EXPECT_PEEK(Token::IDENTIFIER);
-    res = std::make_unique<MemberAccessAST>(tokKind == Token::PUNCT_ARROW
-                                                ? AST::ACCESS_MEMBER_DEREF
-                                                : AST::ACCESS_MEMBER,
-                                            std::move(base), lex->nextToken());
+    if (tokKind == Token::PUNCT_ARROW) {
+      base = std::make_unique<UnopAST>(AST::DEREF, std::move(base));
+    }
+    res = std::make_unique<MemberAccessAST>(std::move(base), lex.next());
     break;
   }
   case Token::PUNCT_PLUSPLUS:
   case Token::PUNCT_MINUSMINUS: {
-    lex->dropToken();
+    lex.drop();
     res = std::make_unique<UnopAST>(
         tokKind == Token::PUNCT_PLUSPLUS ? AST::INC_POST : AST::DEC_POST,
         std::move(base));
@@ -843,7 +980,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
   int qRestrict = 0;
   std::vector<Token::Kind> storageSpecs;
   while (true) {
-    Token::Kind kind = lex->peekTokenKind();
+    Token::Kind kind = lex.peekKind();
     switch (kind) {
     default:
       goto done;
@@ -857,7 +994,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
     case Token::KEYWORD__BOOL:
       if (enableTypeSpec) {
         typeSpecs.push_back(kind);
-        lex->dropToken();
+        lex.drop();
         break;
       } else {
         goto done;
@@ -878,11 +1015,11 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
       }
     case Token::IDENTIFIER:
       if (enableTypeSpec && !ty) {
-        auto *s = sym->getSymbol(lex->peekToken(), Symbol::Namespace::ORDINARY);
+        auto *s = sym.getSymbol(lex.peek(), Symbol::Namespace::ORDINARY);
         if (!s || s->getKind() != Symbol::TYPEDEF) {
           goto done;
         }
-        lex->dropToken();
+        lex.drop();
         ty = &s->getType();
         break;
       } else {
@@ -898,7 +1035,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
       ++qVolatile;
     qualiCont:
       if (enableTypeQuali) {
-        lex->dropToken();
+        lex.drop();
         break;
       } else {
         goto done;
@@ -910,7 +1047,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
     case Token::KEYWORD_REGISTER:
       if (enableStorageSpec) {
         storageSpecs.push_back(kind);
-        lex->dropToken();
+        lex.drop();
         break;
       } else {
         goto done;
@@ -1010,16 +1147,21 @@ const char *Parser::errCtxMsg(ErrCtx errCtx) {
   return "unknown";
 }
 
-ASTError Parser::errorExpectedToken(Token::Kind expectedKind, Token tok) {
+ASTError Parser::errorExpectedToken(std::string_view str, Token tok) {
   log.freeze();
 
   if (tok.isEmpty()) {
-    tok = lex->peekToken();
+    tok = lex.peek();
   }
 
-  std::cerr << "[Error][Parser] Expected '" << Token::kindName(expectedKind)
-            << "', but got " << tok << '\n';
+  std::cerr << "[Error][Parser] Expected " << str << ", but got " << tok
+            << '\n';
 
   return ASTError(ASTError::EXPECTED_TOKEN);
+}
+
+ASTError Parser::errorExpectedToken(Token::Kind expectedKind, Token tok) {
+  return errorExpectedToken(std::format("'{}'", Token::kindName(expectedKind)),
+                            tok);
 }
 } // namespace c

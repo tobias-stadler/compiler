@@ -1,5 +1,9 @@
 #pragma once
 
+#include "support/RTTI.h"
+
+class IntSSAType;
+
 class SSAType {
 public:
   enum Kind {
@@ -28,6 +32,8 @@ public:
   }
 
   Kind getKind() const { return kind; }
+
+  IntSSAType &intType() { return as<IntSSAType>(*this); }
 
 protected:
   SSAType(Kind kind) : kind(kind) {}

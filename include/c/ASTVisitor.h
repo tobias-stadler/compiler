@@ -12,6 +12,7 @@ template <class D> class ASTVisitor {
 public:
   void dispatch(AST *ast) {
     if (!ast) {
+      impl().visitNullptr();
       return;
     }
     dispatch(*ast);
@@ -68,11 +69,10 @@ public:
     case AST::VAR:
       VISIT_DELEGATE(Var);
       break;
-    case AST::NUM:
-      VISIT_DELEGATE(Num);
+    case AST::CONST_INT:
+      VISIT_DELEGATE(IntConst);
       break;
     case AST::ACCESS_MEMBER:
-    case AST::ACCESS_MEMBER_DEREF:
       VISIT_DELEGATE(MemberAccess);
       break;
     case AST::ACCESS_ARRAY:
@@ -88,6 +88,7 @@ public:
       VISIT_DELEGATE(CompoundSt);
       break;
     case AST::ST_WHILE:
+    case AST::ST_DO_WHILE:
       VISIT_DELEGATE(WhileSt);
       break;
     case AST::ST_FOR:
@@ -112,14 +113,35 @@ public:
     case AST::TRANSLATION_UNIT:
       VISIT_DELEGATE(TranslationUnit);
       break;
+    case AST::CAST:
+      VISIT_DELEGATE(Cast);
+      break;
+    case AST::ST_LABEL_NAMED:
+    case AST::ST_LABEL_CASE:
+    case AST::ST_LABEL_DEFAULT:
+      VISIT_DELEGATE(LabelSt);
+      break;
+    case AST::ST_SWITCH:
+      VISIT_DELEGATE(SwitchSt);
+      break;
+    case AST::ST_GOTO:
+      VISIT_DELEGATE(GotoSt);
+      break;
+    case AST::TERNARY:
+      VISIT_DELEGATE(Ternary);
+      break;
+    case AST::INITIALIZER_LIST:
+      VISIT_DELEGATE(InitializerList);
+      break;
     }
   }
 
 protected:
   D &impl() { return static_cast<D &>(*this); }
 
+  void visitNullptr() {}
   void visit(AST &ast) { impl().visit(ast); }
-  void visitNum(NumAST &ast) { impl().visit(ast); }
+  void visitIntConst(IntConstAST &ast) { impl().visit(ast); }
   void visitVar(VarAST &ast) { impl().visit(ast); }
   void visitBinop(BinopAST &ast) { impl().visit(ast); }
   void visitUnop(UnopAST &ast) { impl().visit(ast); }
@@ -138,6 +160,12 @@ protected:
   void visitMemberAccess(MemberAccessAST &ast) { impl().visit(ast); }
   void visitArrAccess(ArrAccessAST &ast) { impl().visit(ast); }
   void visitFunctionCall(FunctionCallAST &ast) { impl().visit(ast); }
+  void visitCast(CastAST &ast) { impl().visit(ast); }
+  void visitLabelSt(LabelStAST &ast) { impl().visit(ast); }
+  void visitGotoSt(GotoStAST &ast) { impl().visit(ast); }
+  void visitSwitchSt(SwitchStAST &ast) { impl().visit(ast); }
+  void visitTernary(TernaryAST &ast) { impl().visit(ast); }
+  void visitInitializerList(InitializerListAST &ast) { impl().visit(ast); }
 };
 
 } // namespace c

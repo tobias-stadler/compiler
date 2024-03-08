@@ -22,8 +22,8 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
     case Operand::SSA_DEF_TYPE:
       std::cout << "unnamed(";
       break;
-    case Operand::SSA_DEF_OTHER: {
-      OtherSSADef &def = op.ssaDefOther();
+    case Operand::SSA_DEF_EXTERN: {
+      ExternSSADef &def = op.ssaDefOther();
       if (def.isGlobal()) {
         std::cout << "global(";
         std::cout << def.global().getName();

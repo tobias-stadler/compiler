@@ -41,12 +41,13 @@ int main(int argc, char *argv[]) {
   f.read(str.data(), sz);
 
   c::Lexer lex(str);
+  c::PPLexer pplex(lex);
   c::ASTContext ctx;
   c::SymbolTable sym;
-  c::Parser p(ctx, lex, sym);
+  c::Parser p(ctx, pplex, sym);
 
   auto ast = p.parseTranslationUnit();
-  if (!ast || lex.peekTokenKind() != c::Token::END) {
+  if (!ast || pplex.peekKind() != c::Token::END) {
     p.printErrCtx(std::cerr);
     return EXIT_FAILURE;
   }

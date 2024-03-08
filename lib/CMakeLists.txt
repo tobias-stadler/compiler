@@ -18,6 +18,7 @@ dslgen(riscv/InstrSelector.dsl isel)
 
 add_library(core
 c/Lexer.cpp
+c/PPLexer.cpp
 c/Parser.cpp
 c/Type.cpp
 c/IRGen.cpp

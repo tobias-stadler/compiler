@@ -1,6 +1,7 @@
 #pragma once
 #include "c/Symbol.h"
 #include "c/Type.h"
+#include "support/MachineInt.h"
 #include "support/RefCount.h"
 #include <cassert>
 #include <cstddef>
@@ -57,6 +58,7 @@ public:
     ASSIGN_XOR,
     ASSIGN_LSHIFT,
     ASSIGN_RSHIFT,
+    TERNARY,
     COMMA,
     PLUS,
     MINUS,
@@ -79,26 +81,33 @@ public:
     DEC_PRE,
     DEC_POST,
     DEREF,
-    ACCESS_MEMBER_DEREF,
     ACCESS_MEMBER,
     ACCESS_ARRAY,
     FUNCTION_CALL,
+    CAST,
     ADDR,
     VAR,
-    NUM,
+    CONST_INT,
     EQ,
     NEQ,
     LT,
     GT,
     LTE,
     GTE,
+    ST_LABEL_NAMED,
+    ST_LABEL_CASE,
+    ST_LABEL_DEFAULT,
     ST_COMPOUND,
     ST_IF,
     ST_WHILE,
+    ST_DO_WHILE,
+    ST_SWITCH,
     ST_FOR,
     ST_CONTINUE,
     ST_BREAK,
     ST_RETURN,
+    ST_GOTO,
+    INITIALIZER_LIST,
     DECLARATOR,
     DECLARATION,
     FUNCTION_DEFINITION,
@@ -115,8 +124,8 @@ public:
       return "Sub";
     case VAR:
       return "Var";
-    case NUM:
-      return "Num";
+    case CONST_INT:
+      return "IntConst";
     case INC_PRE:
       return "IncPre";
     case DEREF:
@@ -201,8 +210,6 @@ public:
       return "FunctionDefinition";
     case TRANSLATION_UNIT:
       return "TranslationUnit";
-    case ACCESS_MEMBER_DEREF:
-      return "DerefMemberAccess";
     case ACCESS_MEMBER:
       return "MemberAccess";
     case ACCESS_ARRAY:
@@ -223,6 +230,24 @@ public:
       return "for";
     case COMMA:
       return "Comma";
+    case CAST:
+      return "Cast";
+    case ST_LABEL_NAMED:
+      return "label";
+    case ST_LABEL_DEFAULT:
+      return "default";
+    case ST_LABEL_CASE:
+      return "case";
+    case ST_SWITCH:
+      return "switch";
+    case ST_GOTO:
+      return "goto";
+    case ST_DO_WHILE:
+      return "do_while";
+    case TERNARY:
+      return "Ternary";
+    case INITIALIZER_LIST:
+      return "InitializerList";
     }
     return "unnamed";
   }
@@ -256,16 +281,53 @@ public:
   Ptr lhs, rhs;
 };
 
-class NumAST : public AST {
+class InitializerListAST : public AST {
 public:
-  int64_t num;
-  NumAST(uint64_t num) : AST(NUM), num(num) {}
+  class Entry {
+  public:
+    Ptr designation;
+    Ptr initializer;
+  };
+
+  InitializerListAST() : AST(INITIALIZER_LIST) {}
+
+  std::vector<Entry> entries;
+};
+
+class TernaryAST : public AST {
+public:
+  TernaryAST(Ptr cond, Ptr lhs, Ptr rhs)
+      : AST(TERNARY), cond(std::move(cond)), lhs(std::move(lhs)),
+        rhs(std::move(rhs)) {}
+
+  AST &getLHS() { return *lhs; }
+  AST &getRHS() { return *rhs; }
+  AST &getCondition() { return *cond; }
+
+  Ptr cond, lhs, rhs;
+};
+
+class IntConstAST : public AST {
+public:
+  IntConstAST(MInt num, Type *type) : AST(CONST_INT), num(num), type(type) {}
+
+  MInt num;
+  Type *type;
+};
+
+class CastAST : public AST {
+public:
+  CastAST(Ptr child, Type *type)
+      : AST(CAST), child(std::move(child)), type(type) {}
+
+  Ptr child;
+  Type *type;
 };
 
 class MemberAccessAST : public AST {
 public:
-  MemberAccessAST(Kind kind, Ptr child, std::string_view ident)
-      : AST(kind), ident(ident), child(std::move(child)) {}
+  MemberAccessAST(Ptr child, std::string_view ident)
+      : AST(ACCESS_MEMBER), ident(ident), child(std::move(child)) {}
   std::string_view ident;
   Ptr child;
 };
@@ -299,6 +361,18 @@ public:
   Scope scope;
 };
 
+class LabelStAST : public AST {
+public:
+  LabelStAST(Ptr st, std::string_view ident)
+      : AST(ST_LABEL_NAMED), st(std::move(st)), ident(ident) {}
+  LabelStAST(Ptr st) : AST(ST_LABEL_DEFAULT), st(std::move(st)) {}
+  LabelStAST(Ptr st, Ptr expr)
+      : AST(ST_LABEL_CASE), st(std::move(st)), expr(std::move(expr)) {}
+  Ptr st;
+  Ptr expr;
+  std::string_view ident;
+};
+
 class IfStAST : public AST {
 public:
   IfStAST(Ptr expr, Ptr st, Ptr stElse = nullptr)
@@ -315,8 +389,25 @@ public:
 
 class WhileStAST : public AST {
 public:
-  WhileStAST(Ptr expr, Ptr st)
-      : AST(ST_WHILE), expr(std::move(expr)), st(std::move(st)) {}
+  WhileStAST(Kind kind, Ptr expr, Ptr st)
+      : AST(kind), expr(std::move(expr)), st(std::move(st)) {}
+
+  AST &getExpression() { return *expr; }
+  AST &getStatement() { return *st; }
+
+  Ptr expr, st;
+};
+
+class GotoStAST : public AST {
+public:
+  GotoStAST(std::string_view ident) : AST(ST_GOTO), ident(ident) {}
+  std::string_view ident;
+};
+
+class SwitchStAST : public AST {
+public:
+  SwitchStAST(Ptr expr, Ptr st)
+      : AST(ST_SWITCH), expr(std::move(expr)), st(std::move(st)) {}
 
   AST &getExpression() { return *expr; }
   AST &getStatement() { return *st; }
@@ -429,7 +520,9 @@ private:
 
 template <typename T> class ASTResult {
 public:
-  ASTResult(T &&res) : mRes(std::forward<T>(res)), mErr(ASTError::EMPTY) {}
+  ASTResult(T &&res) : mRes(std::move(res)), mErr(ASTError::EMPTY) {}
+  ASTResult(const T &res) : mRes(res), mErr(ASTError::EMPTY) {}
+
   ASTResult(ASTError err) : mErr(err) {}
 
   explicit operator bool() { return mErr.isEmpty(); }

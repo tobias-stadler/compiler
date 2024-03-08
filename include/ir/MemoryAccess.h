@@ -3,14 +3,14 @@
 #include "ir/Alignment.h"
 #include "ir/Operand.h"
 
-class MemoryAccessDef : public OtherSSADef {
+class MemoryAccessDef : public ExternSSADef {
 public:
-  static bool is_impl(const OtherSSADef &o) {
+  static bool is_impl(const ExternSSADef &o) {
     return o.getKind() == LOCAL_MEMORY_ACCESS;
   }
 
   MemoryAccessDef(size_t size, Alignment align)
-      : OtherSSADef(LOCAL_MEMORY_ACCESS), size(size), align(align) {}
+      : ExternSSADef(LOCAL_MEMORY_ACCESS), size(size), align(align) {}
 
   size_t getSize() { return size; }
 

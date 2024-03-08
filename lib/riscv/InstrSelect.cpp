@@ -1,7 +1,7 @@
 #include "riscv/InstrSelect.h"
 #include "ir/IR.h"
 #include "riscv/Arch.h"
-#include "support/TCInt.h"
+#include "support/MachineInt.h"
 
 namespace {
 
@@ -33,7 +33,7 @@ bool InstrSelect::execute(Instr &instr) {
     instr.deleteThis();
     return true;
   }
-  if (instr.getKind() == Instr::REF_OTHERSSADEF)
+  if (instr.getKind() == Instr::REF_EXTERN)
     return true;
 
   return false;

@@ -11,11 +11,23 @@ namespace {
 
 class PrintASTVisitor : public ASTVisitor<PrintASTVisitor> {
 public:
+  void visitNullptr() { std::cout << "NULL"; }
+
   void visit(AST &ast) { std::cout << AST::kindName(ast.getKind()); }
 
   void visitVar(VarAST &ast) { std::cout << "Var(" << ast.ident << ")"; }
 
-  void visitNum(NumAST &ast) { std::cout << "Num(" << ast.num << ")"; }
+  void visitIntConst(IntConstAST &ast) {
+    std::cout << "IntConst(";
+    printType(ast.type);
+    std::cout << ",";
+    if (ast.type && Type::isSigned(ast.type->getKind())) {
+      std::cout << ast.num.getMWordSignedSext();
+    } else {
+      std::cout << ast.num.getMWordSext();
+    }
+    std::cout << ")";
+  }
 
   void visitUnop(UnopAST &ast) {
     std::cout << "Unop(" << AST::kindName(ast.getKind());
@@ -23,6 +35,7 @@ public:
     dispatch(ast.getSubExpression());
     std::cout << ")";
   }
+
   void visitBinop(BinopAST &ast) {
     std::cout << "Binop(" << AST::kindName(ast.getKind());
     std::cout << ",";
@@ -33,12 +46,8 @@ public:
   }
 
   void visitMemberAccess(MemberAccessAST &ast) {
-    if (ast.getKind() == AST::ACCESS_MEMBER_DEREF) {
-      std::cout << "MemberAccessDeref(";
-    } else {
-      std::cout << "MemberAccess(";
-    }
-    dispatch(*ast.child);
+    std::cout << "MemberAccess(";
+    dispatch(ast.child.get());
     std::cout << ",";
     std::cout << ast.ident;
     std::cout << ")";
@@ -46,9 +55,9 @@ public:
 
   void visitArrAccess(ArrAccessAST &ast) {
     std::cout << "ArrAccess(";
-    dispatch(*ast.arr);
+    dispatch(ast.arr.get());
     std::cout << ",";
-    dispatch(*ast.expr);
+    dispatch(ast.expr.get());
     std::cout << ")";
   }
 
@@ -59,6 +68,22 @@ public:
       std::cout << ",";
       dispatch(*arg);
     }
+  }
+
+  void visitCast(CastAST &ast) {
+    std::cout << "Cast(";
+    dispatch(*ast.child);
+    std::cout << ",";
+    printType(ast.type);
+    std::cout << ")";
+  }
+
+  void visitLabelSt(LabelStAST &ast) {
+    std::cout << AST::kindName(ast.getKind());
+    std::cout << " " << ast.ident;
+    dispatch(ast.expr.get());
+    std::cout << ": ";
+    dispatch(ast.st.get());
   }
 
   void visitCompoundSt(CompoundStAST &ast) {
@@ -82,12 +107,31 @@ public:
     }
   }
 
+  void visitTernary(TernaryAST &ast) {
+    std::cout << "Ternary(";
+    dispatch(ast.getCondition());
+    std::cout << "?";
+    dispatch(ast.getLHS());
+    std::cout << ":";
+    dispatch(ast.getRHS());
+    std::cout << ")";
+  }
+
   void visitWhileSt(WhileStAST &ast) {
-    std::cout << "while(";
+    std::cout << AST::kindName(ast.getKind()) << "(";
     dispatch(ast.expr.get());
     std::cout << ")";
     dispatch(ast.st.get());
   }
+
+  void visitSwitchSt(SwitchStAST &ast) {
+    std::cout << "switch(";
+    dispatch(ast.expr.get());
+    std::cout << ")";
+    dispatch(ast.st.get());
+  }
+
+  void visitGotoSt(GotoStAST &ast) { std::cout << "goto " << ast.ident; }
 
   void visitForSt(ForStAST &ast) {
     std::cout << "for(";
@@ -111,6 +155,17 @@ public:
   void visitDeclarator(DeclaratorAST &ast) {
     std::cout << ast.ident << " is ";
     printType(ast.type);
+  }
+
+  void visitInitializerList(InitializerListAST &ast) {
+    std::cout << "{";
+    for (auto &e : ast.entries) {
+      dispatch(e.designation.get());
+      std::cout << " = ";
+      dispatch(e.initializer.get());
+      std::cout << ", ";
+    }
+    std::cout << "}";
   }
 
   void visitDeclaration(DeclarationAST &ast) {

@@ -3,6 +3,7 @@
 #include "ir/FrameLayout.h"
 #include "ir/IR.h"
 #include "support/IntrusiveList.h"
+#include "support/MachineInt.h"
 #include <cassert>
 #include <numbers>
 #include <span>
@@ -108,11 +109,10 @@ public:
     return emit(getFunction().createInstr(kind, cap));
   }
 
-  Instr &emitConstInt(SSAType &type, int32_t val) {
-    assert(type.getKind() == SSAType::INT);
+  Instr &emitConstInt(MInt val) {
     Instr &i = emitInstr(Instr::CONST_INT, 2);
-    i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
-    i.emplaceOperand<Operand::IMM32>(val);
+    i.emplaceOperand<Operand::SSA_DEF_TYPE>(IntSSAType::get(val.getBits()));
+    i.emplaceOperand<Operand::MINT>(val);
     return i;
   }
 
@@ -239,8 +239,8 @@ public:
     return i.getDef();
   }
 
-  Operand &emitOtherSSADefRef(SSAType &type, OtherSSADef &def) {
-    Instr &i = emitInstr(Instr::REF_OTHERSSADEF, 2);
+  Operand &emitExternRef(SSAType &type, ExternSSADef &def) {
+    Instr &i = emitInstr(Instr::REF_EXTERN, 2);
     i.emplaceOperand<Operand::SSA_DEF_TYPE>(type);
     i.emplaceOperand<Operand::SSA_USE>(def.getDef());
     return i.getDef();
@@ -279,13 +279,12 @@ public:
   }
 
   Instr &emitNot(Operand &val) {
-    // TODO: arbitrary int
-    Instr &i = emitConstInt(val.ssaDefType(), -1);
+    Instr &i = emitConstInt(MInt::negOne(val.ssaDefType().intType().getBits()));
     return emitXor(val, i.getDef());
   }
 
   Instr &emitNeg(Operand &val) {
-    Instr &i = emitConstInt(val.ssaDefType(), 0);
+    Instr &i = emitConstInt(MInt::zero(val.ssaDefType().intType().getBits()));
     return emitSub(i.getDef(), val);
   }
 

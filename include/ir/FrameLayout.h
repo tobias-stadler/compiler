@@ -6,16 +6,16 @@
 #include <ranges>
 #include <vector>
 
-class FrameDef : public OtherSSADef {
+class FrameDef : public ExternSSADef {
   friend class FrameLayout;
 
 public:
-  static bool is_impl(const OtherSSADef &o) {
+  static bool is_impl(const ExternSSADef &o) {
     return o.getKind() == LOCAL_FRAME;
   }
 
   FrameDef(int32_t id, size_t size, Alignment align)
-      : OtherSSADef(LOCAL_FRAME), id(id), size(size), align(align) {}
+      : ExternSSADef(LOCAL_FRAME), id(id), size(size), align(align) {}
 
   int32_t getId() const { return id; }
 

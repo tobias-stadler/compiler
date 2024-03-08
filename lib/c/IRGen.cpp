@@ -202,7 +202,7 @@ public:
     assert(s.kind == StorageBuilder::EMPTY);
     auto [size, align] = mem.getSizeAndAlignment(s.symbol->getType());
 
-    Operand &ptr = ir->emitOtherSSADefRef(
+    Operand &ptr = ir->emitExternRef(
         irType(Type::PTR),
         ir.getFunc().getFrameLayout().createFrameEntry(size, align));
 
@@ -226,10 +226,10 @@ public:
 
   void visit(AST &ast) { assert(false && "Unsupported"); }
 
-  void visitNum(NumAST &ast) {
-    ir->emitConstInt(IntSSAType::get(32), ast.num);
+  void visitIntConst(IntConstAST &ast) {
+    ir->emitConstInt(ast.num);
     tmpOperand = &ir.getDef();
-    sema.fromType(ctx.make_type<BasicType>(Type::SINT));
+    sema.fromType(*ast.type);
   }
 
   void visitVar(VarAST &ast) {
@@ -303,7 +303,8 @@ public:
       offset = mem.getStructLayout(structTy).offsets[idx];
     }
     if (offset) {
-      ir->emitConstInt(tmpOperand->ssaDefType(), offset);
+      ir->emitConstInt(
+          MInt{tmpOperand->ssaDefType().intType().getBits(), offset});
       ir->emitAdd(*tmpOperand, ir.getDef());
       tmpOperand = &ir.getDef();
     }
@@ -583,8 +584,7 @@ public:
   }
 
   ExpressionSemantics::Result semanticConvBool() {
-    assert(tmpOperand->ssaDefType().getKind() == SSAType::INT);
-    ir->emitConstInt(static_cast<IntSSAType &>(tmpOperand->ssaDefType()), 0);
+    ir->emitConstInt(MInt::zero(tmpOperand->ssaDefType().intType().getBits()));
     ir->emitCmp(BrCond::ne(), *tmpOperand, ir.getDef());
     tmpOperand = &ir.getDef();
     return ExpressionSemantics::SUCCESS;

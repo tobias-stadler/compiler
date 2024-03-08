@@ -15,15 +15,18 @@ public:
     EMPTY,
     INVALID,
     END,
+    SPACE_START,
     SPACE,
-    ESCAPE,
     COMMENT,
-    IDENTIFIER,
+    NEWLINE,
+    SPACE_END,
+    HEADER_NAME,
     LITERAL_START,
-    LITERAL_NUM,
+    PP_NUM,
     LITERAL_CHAR,
     LITERAL_STR,
     LITERAL_END,
+    IDENTIFIER,
     KEYWORD_START,
     KEYWORD_AUTO,
     KEYWORD_BREAK,
@@ -107,8 +110,10 @@ public:
     PUNCT_GTGT,
     PUNCT_GTGTEQ,
     PUNCT_ARROW,
+    PUNCT_HASH,
+    PUNCT_HASHHASH,
+    PUNCT_DOTDOTDOT,
     PUNCT_END,
-    TOKEN_END,
   };
 
   constexpr Token(Kind kind = EMPTY, const char *text = nullptr, size_t len = 0)
@@ -118,13 +123,15 @@ public:
   const char *text;
   size_t textLen;
 
-  static constexpr bool isAlpha(unsigned char c) {
+  static constexpr bool isAlphaChar(unsigned char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
   }
-  static constexpr bool isNum(unsigned char c) { return c >= '0' && c <= '9'; }
+  static constexpr bool isNumChar(unsigned char c) {
+    return c >= '0' && c <= '9';
+  }
 
-  static constexpr bool isSpace(unsigned char c) {
-    return c == ' ' || (c >= 9 && c <= 13);
+  static constexpr bool isSpaceChar(unsigned char c) {
+    return c == ' ' || (c >= 9 && c <= 13 && c != '\n');
   }
 
   static constexpr bool isPunctuator(Kind kind) {
@@ -134,19 +141,25 @@ public:
   static constexpr bool isKeyword(Kind kind) {
     return kind >= KEYWORD_START && kind <= KEYWORD_END;
   }
+  static constexpr bool isWhiteSpace(Kind kind) {
+    return kind >= SPACE_START && kind <= SPACE_END;
+  }
 
   static constexpr int NUM_KEYWORDS = KEYWORD_END - KEYWORD_START - 1;
 
   static const char *kindName(Kind kind);
 
   static consteval Token::Kind charKind(unsigned char c) {
-    if (isNum(c)) {
-      return LITERAL_NUM;
+    if (isNumChar(c)) {
+      return PP_NUM;
     }
-    if (isAlpha(c) || c == '_') {
+    if (isAlphaChar(c) || c == '_') {
       return IDENTIFIER;
     }
-    if (isSpace(c)) {
+    if (c == '\n') {
+      return NEWLINE;
+    }
+    if (isSpaceChar(c)) {
       return SPACE;
     }
     switch (c) {
@@ -202,11 +215,11 @@ public:
       return PUNCT_PERCENT;
     case '?':
       return PUNCT_QUESTION;
-    case '\\':
-      return ESCAPE;
     }
     return INVALID;
   }
+
+  static_assert(sizeof(char) == 1);
 
   static consteval std::array<Token::Kind, 256> charTable() {
     std::array<Token::Kind, 256> a{Token::INVALID};
@@ -227,6 +240,7 @@ public:
   bool isEnd() const;
   bool isKeyword() const;
   bool isPunctuator() const;
+  bool isWhiteSpace() const { return isWhiteSpace(kind); }
 
   bool isValidString() const;
 };
@@ -236,12 +250,9 @@ std::ostream &operator<<(std::ostream &os, Token tok);
 class Lexer {
 public:
   Lexer(std::string_view input);
-  Token nextToken();
-  Token peekToken();
-  void dropToken();
-  Token::Kind peekTokenKind();
-  bool matchNextToken(Token::Kind kind);
-  bool matchPeekToken(Token::Kind kind);
+  Token next();
+
+  void setEnableHeaderNames(bool v) { enableHeaderNames = v; }
 
 private:
   static constexpr auto matchTable = Token::charTable();
@@ -251,29 +262,38 @@ private:
   std::string_view::iterator currPos;
   Token currTok;
   unsigned char currChar;
+  bool enableHeaderNames = false;
 
   void getToken();
   void eatToken();
   bool getChar();
+  bool getCharOrEndInvalid();
   void eatChar();
-  void dropChar();
+  bool hasAtLeastNChars(size_t n);
+
+  void endToken(Token::Kind kind) {
+    currTok.kind = kind;
+    endToken();
+  }
+  void endToken() { currTok.textLen = getPosPtr() - currTok.text; }
 
   const char *getPosPtr();
   void probeKeyword();
-  void getPosToken(Token::Kind kind);
+  void startToken(Token::Kind kind = Token::INVALID);
 
-  template <Token::Kind DELIM> void eatLiteralStr() {
-    dropChar();
-    getPosToken(DELIM);
+  template <char DELIM> void eatLiteralStrTail() {
     while (getChar()) {
-      switch (matchTable[currChar]) {
+      switch (currChar) {
       case DELIM:
-        dropChar();
-        return;
-      case Token::ESCAPE:
         eatChar();
-        if (!getChar())
-          break;
+        return;
+      case '\n':
+        endToken(Token::INVALID);
+        return;
+      case '\\':
+        eatChar();
+        if (!getCharOrEndInvalid())
+          return;
         eatChar();
         break;
       default:
@@ -281,17 +301,21 @@ private:
         break;
       }
     }
-    currTok.kind = Token::INVALID;
+    endToken(Token::INVALID);
   }
 
-  void eatIdentifier(Token::Kind kind);
+  void eatSpace();
+  void eatSingleLineCommentTail();
+  void eatMultiLineCommentTail();
+  void eatIdentifier();
+  void eatPPNumTail();
 
   template <Token::Kind BASE, Token::Kind REP = Token::EMPTY,
             Token::Kind EQ = Token::EMPTY, Token::Kind REPEQ = Token::EMPTY>
   void eatOperator() {
     static_assert(REPEQ == Token::EMPTY || REP != Token::EMPTY,
                   "REP must be set to use REPEQ");
-    getPosToken(BASE);
+    startToken(BASE);
     eatChar();
     if (!getChar()) {
       return;
@@ -300,32 +324,61 @@ private:
 
     if constexpr (BASE == Token::PUNCT_EQ) {
       switch (kind) {
-      case BASE:
-        if constexpr (REP != Token::EMPTY) {
-          currTok.kind = REP;
-          break;
-        }
+      case Token::PUNCT_EQ:
+        currTok.kind = Token::PUNCT_EQEQ;
+        eatChar();
         return;
       default:
         return;
       }
     } else if constexpr (BASE == Token::PUNCT_MINUS) {
       switch (kind) {
-      case BASE:
-        if constexpr (REP != Token::EMPTY) {
-          currTok.kind = REP;
-          break;
-        }
+      case Token::PUNCT_MINUS:
+        currTok.kind = Token::PUNCT_MINUSMINUS;
+        eatChar();
         return;
       case Token::PUNCT_EQ:
-        if constexpr (EQ != Token::EMPTY) {
-          currTok.kind = EQ;
-          eatChar();
-        }
+        currTok.kind = Token::PUNCT_MINUSEQ;
+        eatChar();
         return;
       case Token::PUNCT_GT:
         currTok.kind = Token::PUNCT_ARROW;
         eatChar();
+        return;
+      default:
+        return;
+      }
+    } else if constexpr (BASE == Token::PUNCT_SLASH) {
+      switch (kind) {
+      case Token::PUNCT_SLASH:
+        currTok.kind = Token::COMMENT;
+        eatChar();
+        eatSingleLineCommentTail();
+        return;
+      case Token::PUNCT_STAR:
+        currTok.kind = Token::COMMENT;
+        eatChar();
+        eatMultiLineCommentTail();
+        return;
+      case Token::PUNCT_EQ:
+        currTok.kind = Token::PUNCT_SLASHEQ;
+        eatChar();
+        return;
+      default:
+        return;
+      }
+    } else if constexpr (BASE == Token::PUNCT_DOT) {
+      switch (kind) {
+      case Token::PUNCT_DOT:
+        if (hasAtLeastNChars(2) && *(currPos + 1) == '.') {
+          currTok.kind = Token::PUNCT_DOTDOTDOT;
+          eatChar();
+          eatChar();
+        }
+        return;
+      case Token::PP_NUM:
+        currTok.kind = Token::PP_NUM;
+        eatPPNumTail();
         return;
       default:
         return;

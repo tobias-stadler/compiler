@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ir/SSAType.h"
+#include "support/MachineInt.h"
 #include "support/RTTI.h"
 #include <cassert>
 #include <functional>
@@ -10,7 +11,7 @@ class Operand;
 class Instr;
 class Block;
 
-class OtherSSADef;
+class ExternSSADef;
 class GlobalDef;
 
 class Reg {
@@ -266,20 +267,21 @@ public:
   enum Kind {
     EMPTY,
     SSA_DEF_TYPE,
-    SSA_DEF_OTHER,
+    SSA_DEF_EXTERN,
     SSA_USE,
     REG_DEF,
     REG_USE,
     BLOCK,
     TYPE,
     IMM32,
+    MINT,
     BRCOND,
     CHAIN,
   };
   static constexpr bool kindIsSSADef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
-    case SSA_DEF_OTHER:
+    case SSA_DEF_EXTERN:
       return true;
     default:
       return false;
@@ -295,7 +297,7 @@ public:
   static constexpr bool kindIsDef(Kind kind) {
     switch (kind) {
     case SSA_DEF_TYPE:
-    case SSA_DEF_OTHER:
+    case SSA_DEF_EXTERN:
     case REG_DEF:
       return true;
     default:
@@ -313,7 +315,7 @@ public:
     case EMPTY:
       break;
     case SSA_DEF_TYPE:
-    case SSA_DEF_OTHER:
+    case SSA_DEF_EXTERN:
       assert(false && "Cannot copy SSA operand");
       break;
     case SSA_USE:
@@ -341,6 +343,9 @@ public:
     case CHAIN:
       assert(false && "Don't copy chain!");
       break;
+    case MINT:
+      emplaceRaw<MINT>(o.contentMInt);
+      break;
     }
     return *this;
   }
@@ -360,7 +365,7 @@ public:
       contentReg.~Reg();
       break;
     case SSA_DEF_TYPE:
-    case SSA_DEF_OTHER:
+    case SSA_DEF_EXTERN:
       contentDef.~SSADef();
       break;
     case SSA_USE:
@@ -371,6 +376,9 @@ public:
       break;
     case BRCOND:
       contentBrCond.~BrCond();
+      break;
+    case MINT:
+      contentMInt.~MInt();
       break;
     }
     kind = EMPTY;
@@ -386,6 +394,8 @@ public:
       new (&contentReg) Reg(std::forward<ARGS>(args)...);
     } else if constexpr (K == IMM32) {
       new (&contentImm32) int32_t(std::forward<ARGS>(args)...);
+    } else if constexpr (K == MINT) {
+      new (&contentMInt) MInt(std::forward<ARGS>(args)...);
     } else if constexpr (K == BRCOND) {
       new (&contentBrCond) BrCond(std::forward<ARGS>(args)...);
     } else if constexpr (K == BLOCK) {
@@ -430,9 +440,9 @@ public:
 
   Block &ssaDefBlock() { return as<Block>(ssaDefOther()); }
 
-  OtherSSADef &ssaDefOther() {
-    assert(kind == SSA_DEF_OTHER);
-    return reinterpret_cast<OtherSSADef &>(*this);
+  ExternSSADef &ssaDefOther() {
+    assert(kind == SSA_DEF_EXTERN);
+    return reinterpret_cast<ExternSSADef &>(*this);
   }
 
   void ssaDefReplace(Reg reg) {
@@ -453,6 +463,11 @@ public:
   BrCond brCond() const {
     assert(kind == BRCOND);
     return contentBrCond;
+  }
+
+  MInt &mInt() {
+    assert(kind == MINT);
+    return contentMInt;
   }
 
   OperandChain &chain() {
@@ -538,13 +553,14 @@ private:
     OperandChain contentChain;
     Reg contentReg;
     int32_t contentImm32;
+    MInt contentMInt;
     Block *contentBlock;
     SSAType *contentType;
     BrCond contentBrCond;
   };
 };
 
-class OtherSSADef {
+class ExternSSADef {
 public:
   enum Kind {
     GLOBAL_START,
@@ -559,11 +575,11 @@ public:
     LOCAL_END
   };
 
-  OtherSSADef(Kind kind) : kind(kind) {
-    def.emplace<Operand::SSA_DEF_OTHER>(nullptr, nullptr);
+  ExternSSADef(Kind kind) : kind(kind) {
+    def.emplace<Operand::SSA_DEF_EXTERN>(nullptr, nullptr);
   }
-  OtherSSADef(Kind kind, SSAType &type) : kind(kind) {
-    def.emplace<Operand::SSA_DEF_OTHER>(nullptr, type);
+  ExternSSADef(Kind kind, SSAType &type) : kind(kind) {
+    def.emplace<Operand::SSA_DEF_EXTERN>(nullptr, type);
   }
 
   Kind getKind() const { return kind; }
@@ -587,15 +603,15 @@ public:
   Block &block() { return as<Block>(*this); }
 
 protected:
-  ~OtherSSADef() = default;
+  ~ExternSSADef() = default;
 
 private:
   Operand def; // This needs to be the first member, so that Operand*
-               // can be directly converted to OtherSSADef*
+               // can be directly converted to ExternSSADef*
   Kind kind;
 };
 
-static_assert(std::is_standard_layout_v<OtherSSADef>);
+static_assert(std::is_standard_layout_v<ExternSSADef>);
 
 inline SSADef::iterator &SSADef::iterator::operator++() {
   assert(mPtr);

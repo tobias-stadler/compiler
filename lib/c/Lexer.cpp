@@ -1,19 +1,25 @@
 #include "c/Lexer.h"
+#include <cassert>
 #include <string_view>
 
 namespace c {
 
 std::ostream &operator<<(std::ostream &os, Token tok) {
   os << Token::kindName(tok.kind);
-  if (tok.isValidString()) {
-    os << " \'" << std::string_view(tok) << '\'';
+  if (tok.kind == Token::NEWLINE) {
+    return os;
+  }
+  if (tok.isValidString() && !tok.isPunctuator() && !tok.isKeyword()) {
+    os << "'" << std::string_view(tok) << "'";
   }
   return os;
 }
 
-Lexer::Lexer(std::string_view input) : input(input), currPos(input.begin()) {
-  getToken();
-};
+Lexer::Lexer(std::string_view input) : input(input), currPos(input.begin()){};
+
+bool Lexer::hasAtLeastNChars(size_t n) {
+  return (size_t)std::distance(currPos, input.end()) >= n;
+}
 
 bool Lexer::getChar() {
   if (currPos == input.end()) {
@@ -21,6 +27,14 @@ bool Lexer::getChar() {
   }
   currChar = *currPos;
   return true;
+}
+
+bool Lexer::getCharOrEndInvalid() {
+  if (getChar()) {
+    return true;
+  }
+  endToken(Token::INVALID);
+  return false;
 }
 
 std::unordered_map<std::string_view, Token::Kind> Lexer::keywords = {
@@ -59,6 +73,10 @@ std::unordered_map<std::string_view, Token::Kind> Lexer::keywords = {
     {"break", Token::KEYWORD_BREAK},
     {"auto", Token::KEYWORD_AUTO},
     {"_Bool", Token::KEYWORD__BOOL},
+    {"u8", Token::LITERAL_STR},
+    {"u", Token::LITERAL_CHAR},
+    {"U", Token::LITERAL_CHAR},
+    {"L", Token::LITERAL_CHAR},
 };
 
 void Lexer::eatToken() {
@@ -66,30 +84,40 @@ void Lexer::eatToken() {
     Token::Kind kind = matchTable[currChar];
     switch (kind) {
     default:
-      getPosToken(Token::INVALID);
+      startToken(Token::INVALID);
       eatChar();
       return;
     case Token::LITERAL_STR:
-      eatLiteralStr<Token::LITERAL_STR>();
+      if (enableHeaderNames) {
+        startToken(Token::HEADER_NAME);
+      } else {
+        startToken(Token::LITERAL_STR);
+      }
+      eatChar();
+      eatLiteralStrTail<'"'>();
       return;
     case Token::LITERAL_CHAR:
-      eatLiteralStr<Token::LITERAL_CHAR>();
+      startToken(Token::LITERAL_CHAR);
+      eatChar();
+      eatLiteralStrTail<'\''>();
       return;
     case Token::IDENTIFIER:
-    case Token::LITERAL_NUM:
-      eatIdentifier(kind);
+      eatIdentifier();
       probeKeyword();
       return;
+    case Token::PP_NUM:
+      startToken(Token::PP_NUM);
+      eatPPNumTail();
+      return;
     case Token::SPACE:
-      dropChar();
-      continue;
+      eatSpace();
+      return;
     case Token::PUNCT_PLUS:
       eatOperator<Token::PUNCT_PLUS, Token::PUNCT_PLUSPLUS,
                   Token::PUNCT_PLUSEQ>();
       return;
     case Token::PUNCT_MINUS:
-      eatOperator<Token::PUNCT_MINUS, Token::PUNCT_MINUSMINUS,
-                  Token::PUNCT_MINUSEQ>();
+      eatOperator<Token::PUNCT_MINUS>();
       return;
     case Token::PUNCT_OR:
       eatOperator<Token::PUNCT_OR, Token::PUNCT_OROR, Token::PUNCT_OREQ>();
@@ -101,7 +129,7 @@ void Lexer::eatToken() {
       eatOperator<Token::PUNCT_STAR, Token::EMPTY, Token::PUNCT_STAREQ>();
       return;
     case Token::PUNCT_EQ:
-      eatOperator<Token::PUNCT_EQ, Token::PUNCT_EQEQ>();
+      eatOperator<Token::PUNCT_EQ>();
       return;
     case Token::PUNCT_EXCLAMATION:
       eatOperator<Token::PUNCT_EXCLAMATION, Token::EMPTY,
@@ -111,18 +139,27 @@ void Lexer::eatToken() {
       eatOperator<Token::PUNCT_XOR, Token::EMPTY, Token::PUNCT_XOREQ>();
       return;
     case Token::PUNCT_SLASH:
-      eatOperator<Token::PUNCT_SLASH, Token::EMPTY, Token::PUNCT_SLASHEQ>();
+      eatOperator<Token::PUNCT_SLASH>();
       return;
     case Token::PUNCT_PERCENT:
       eatOperator<Token::PUNCT_PERCENT, Token::EMPTY, Token::PUNCT_PERCENTEQ>();
       return;
     case Token::PUNCT_LT:
-      eatOperator<Token::PUNCT_LT, Token::PUNCT_LTLT, Token::PUNCT_LTEQ,
-                  Token::PUNCT_LTLTEQ>();
+      if (enableHeaderNames) {
+        startToken(Token::HEADER_NAME);
+        eatChar();
+        eatLiteralStrTail<'>'>();
+      } else {
+        eatOperator<Token::PUNCT_LT, Token::PUNCT_LTLT, Token::PUNCT_LTEQ,
+                    Token::PUNCT_LTLTEQ>();
+      }
       return;
     case Token::PUNCT_GT:
       eatOperator<Token::PUNCT_GT, Token::PUNCT_GTGT, Token::PUNCT_GTEQ,
                   Token::PUNCT_GTGTEQ>();
+      return;
+    case Token::PUNCT_DOT:
+      eatOperator<Token::PUNCT_DOT>();
       return;
     case Token::PUNCT_CURLYO:
     case Token::PUNCT_CURLYC:
@@ -134,9 +171,9 @@ void Lexer::eatToken() {
     case Token::PUNCT_SEMICOLON:
     case Token::PUNCT_QUESTION:
     case Token::PUNCT_COMMA:
-    case Token::PUNCT_DOT:
     case Token::PUNCT_TILDE:
-      getPosToken(kind);
+    case Token::NEWLINE:
+      startToken(kind);
       eatChar();
       return;
     }
@@ -144,16 +181,66 @@ void Lexer::eatToken() {
   currTok = Token(Token::END);
 }
 
-void Lexer::eatIdentifier(Token::Kind kind) {
-  getPosToken(kind);
+void Lexer::eatSingleLineCommentTail() {
   while (getChar()) {
-    switch (matchTable[currChar]) {
-    case Token::IDENTIFIER:
-    case Token::LITERAL_NUM:
-      eatChar();
+    if (currChar == '\n')
       break;
-    default:
+    eatChar();
+  }
+}
+
+void Lexer::eatMultiLineCommentTail() {
+  bool wasStar = false;
+  while (getChar()) {
+    eatChar();
+    if (wasStar && currChar == '/') {
+      break;
+    }
+    wasStar = false;
+    if (currChar == '*') {
+      wasStar = true;
+    }
+  }
+}
+
+void Lexer::eatSpace() {
+  startToken(Token::SPACE);
+  while (getChar()) {
+    if (Token::isSpaceChar(currChar)) {
+      eatChar();
+    } else {
       return;
+    }
+  }
+}
+
+void Lexer::eatIdentifier() {
+  startToken(Token::IDENTIFIER);
+  while (getChar()) {
+    if (Token::isAlphaChar(currChar) || Token::isNumChar(currChar) ||
+        currChar == '_') {
+      eatChar();
+    } else {
+      return;
+    }
+  }
+}
+
+void Lexer::eatPPNumTail() {
+  bool nextSign = false;
+  while (getChar()) {
+    if (Token::isNumChar(currChar) || Token::isAlphaChar(currChar) ||
+        currChar == '_' || currChar == '.' ||
+        (nextSign && (currChar == '+' || currChar == '-'))) {
+      if (currChar == 'e' || currChar == 'E' || currChar == 'p' ||
+          currChar == 'P') {
+        nextSign = true;
+      } else {
+        nextSign = false;
+      }
+      eatChar();
+    } else {
+      break;
     }
   }
 }
@@ -161,46 +248,46 @@ void Lexer::eatIdentifier(Token::Kind kind) {
 void Lexer::probeKeyword() {
   if (!currTok.isValidString())
     return;
-  if (auto i = keywords.find(std::string_view(currTok)); i != keywords.end()) {
-    currTok.kind = i->second;
+  auto it = keywords.find(std::string_view(currTok));
+  if (it == keywords.end())
+    return;
+  auto kind = it->second;
+  if (kind == Token::LITERAL_STR || kind == Token::LITERAL_CHAR) {
+    if (!getChar()) {
+      return;
+    }
+    switch (currChar) {
+    case '\'':
+      if (kind == Token::LITERAL_CHAR) {
+        currTok.kind = Token::LITERAL_CHAR;
+        eatChar();
+        eatLiteralStrTail<'\''>();
+      }
+      break;
+    case '"':
+      currTok.kind = Token::LITERAL_STR;
+      eatChar();
+      eatLiteralStrTail<'"'>();
+      break;
+    }
+  } else {
+    currTok.kind = kind;
   }
 }
 
 void Lexer::getToken() {
-  if (currTok.isEnd()) {
-    return;
-  }
+  assert(!currTok.isEnd());
   eatToken();
 }
 
-Token Lexer::peekToken() { return currTok; }
-
-Token Lexer::nextToken() {
-  Token tok = currTok;
+Token Lexer::next() {
   getToken();
-  return tok;
-}
-
-bool Lexer::matchPeekToken(Token::Kind kind) {
-  if (currTok.kind != kind)
-    return false;
-
-  return true;
-}
-
-bool Lexer::matchNextToken(Token::Kind kind) {
-  if (currTok.kind != kind)
-    return false;
-
-  getToken();
-  return true;
+  return currTok;
 }
 
 const char *Lexer::getPosPtr() { return &currPos[0]; }
 
-void Lexer::getPosToken(Token::Kind kind) {
-  currTok = Token(kind, getPosPtr());
-}
+void Lexer::startToken(Token::Kind kind) { currTok = Token(kind, getPosPtr()); }
 
 bool Token::isEmpty() const { return kind == EMPTY; }
 
@@ -214,33 +301,27 @@ bool Token::isPunctuator() const { return isPunctuator(kind); }
 
 bool Token::isValidString() const { return text && textLen > 0; }
 
-Token::Kind Lexer::peekTokenKind() { return currTok.kind; };
-void Lexer::dropChar() { ++currPos; }
-
 void Lexer::eatChar() {
   ++currPos;
   ++currTok.textLen;
 }
-void Lexer::dropToken() { getToken(); }
 
 const char *Token::kindName(Kind kind) {
   switch (kind) {
   case END:
-    return "EOF";
+    return "<end>";
   case SPACE:
-    return "whitespace";
+    return "<space>";
   case COMMENT:
-    return "comment";
+    return "<comment>";
   case IDENTIFIER:
-    return "identifier";
-  case LITERAL_NUM:
-    return "number literal";
+    return "<identifier>";
+  case PP_NUM:
+    return "<pp-num>";
   case LITERAL_CHAR:
-    return "char literal";
+    return "<char>";
   case LITERAL_STR:
-    return "string literal";
-  case ESCAPE:
-    return "\\";
+    return "<string>";
   case KEYWORD_AUTO:
     return "auto";
   case KEYWORD_BREAK:
@@ -401,8 +482,30 @@ const char *Token::kindName(Kind kind) {
     return ">>=";
   case PUNCT_ARROW:
     return "->";
-  default:
-    return "<illegal>";
+  case EMPTY:
+    return "<empty>";
+  case INVALID:
+    return "<invalid>";
+  case NEWLINE:
+    return "<newline>";
+  case HEADER_NAME:
+    return "<header>";
+  case PUNCT_HASH:
+    return "#";
+  case PUNCT_HASHHASH:
+    return "##";
+  case PUNCT_DOTDOTDOT:
+    return "...";
+  case LITERAL_START:
+  case LITERAL_END:
+  case KEYWORD_START:
+  case KEYWORD_END:
+  case PUNCT_START:
+  case PUNCT_END:
+  case SPACE_START:
+  case SPACE_END:
+    break;
   }
+  return "<illegal>";
 }
 } // namespace c

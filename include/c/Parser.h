@@ -1,6 +1,6 @@
 #pragma once
 #include "c/AST.h"
-#include "c/Lexer.h"
+#include "c/PPLexer.h"
 #include "c/Symbol.h"
 #include "c/Type.h"
 #include "support/ErrorRecovery.h"
@@ -21,10 +21,27 @@ public:
   QualifiedType::Qualifier qualifier;
 };
 
+enum class Precedence : int {
+  NONE = -1,
+  COMMA,
+  ASSIGN,
+  TERNARY,
+  LOG_OR,
+  LOG_AND,
+  BIT_OR,
+  BIT_XOR,
+  BIT_AND,
+  EQUALITY,
+  RELATIONAL,
+  SHIFT,
+  ADD,
+  MUL,
+};
+
 class Parser {
 public:
-  Parser(ASTContext &ctx, Lexer &lex, SymbolTable &sym)
-      : lex(&lex), sym(&sym), ctx(ctx) {
+  Parser(ASTContext &ctx, PPLexer &lex, SymbolTable &sym)
+      : lex(lex), sym(sym), ctx(ctx) {
     sym.clearScopeStack();
   }
 
@@ -48,6 +65,7 @@ public:
   ASTError error(std::string_view str = {"Unnamed error"});
   ASTError errorExpectedToken(Token::Kind expectedKind,
                               Token tok = Token::EMPTY);
+  ASTError errorExpectedToken(std::string_view str, Token tok = Token::EMPTY);
 
   ASTError nop() { return ASTError(ASTError::NOP); };
 
@@ -57,8 +75,11 @@ public:
 
   ASTPtrResult parseStatement();
 
-  ASTPtrResult parseExpression(int prec = 0);
+  ASTPtrResult parseExpression(Precedence prec = Precedence::NONE);
 
+  ASTPtrResult parseInitializer();
+  ASTPtrResult parseInitializerList();
+  ASTResult<Type *> parseTypeName();
   ASTPtrResult parseUnary();
   ASTPtrResult parsePostfix(AST::Ptr base);
 
@@ -82,8 +103,8 @@ public:
   static const char *errCtxMsg(ErrCtx ctx);
 
 private:
-  Lexer *lex;
-  SymbolTable *sym;
+  PPLexer &lex;
+  SymbolTable &sym;
   FrameLogger<ErrCtx> log;
   ASTContext &ctx;
 };

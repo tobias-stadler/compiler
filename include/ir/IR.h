@@ -20,16 +20,16 @@ using SymbolId = unsigned;
 
 class Function;
 
-class GlobalDef : public OtherSSADef {
+class GlobalDef : public ExternSSADef {
 public:
-  static bool is_impl(const OtherSSADef &o) {
+  static bool is_impl(const ExternSSADef &o) {
     return kindIsGlobal(o.getKind());
   }
 
   enum class Linkage { EXTERNAL, INTERNAL };
 
   GlobalDef(Kind kind, std::string name)
-      : OtherSSADef(kind), name(std::move(name)) {}
+      : ExternSSADef(kind), name(std::move(name)) {}
 
   const std::string &getName() const { return name; }
 
@@ -89,13 +89,13 @@ private:
 
 class Block : public IntrusiveList<Instr, Block>,
               public IntrusiveListNode<Block, Function>,
-              public OtherSSADef {
+              public ExternSSADef {
 public:
-  static bool is_impl(const OtherSSADef &o) {
+  static bool is_impl(const ExternSSADef &o) {
     return o.getKind() == LOCAL_BLOCK;
   }
 
-  Block() : OtherSSADef(LOCAL_BLOCK) {}
+  Block() : ExternSSADef(LOCAL_BLOCK) {}
 
   unsigned getNumPredecessors() { return getDef().ssaDef().getNumUses(); }
 
@@ -137,7 +137,7 @@ public:
     LOAD,
     STORE,
     ALLOCA,
-    REF_OTHERSSADEF,
+    REF_EXTERN,
     REF_PARAM,
     INSTR_END,
     ARCH_INSTR,
@@ -236,8 +236,8 @@ public:
       return "STORE";
     case ALLOCA:
       return "ALLOCA";
-    case REF_OTHERSSADEF:
-      return "REF_OTHERSSADEF";
+    case REF_EXTERN:
+      return "REF_EXTERN";
     case REF_PARAM:
       return "REF_PARAM";
     case EMPTY:

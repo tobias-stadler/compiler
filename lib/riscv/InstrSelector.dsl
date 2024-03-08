@@ -359,7 +359,7 @@ ir_pat {
 
 ir_pat {
   match {
-    REF_OTHERSSADEF def(%gaddr,i32) %g;
+    REF_EXTERN def(%gaddr,i32) %g;
   }
   if {
     %g $.ssaDefOther().isGlobal()$
