@@ -48,6 +48,7 @@ std::unordered_map<std::string_view, Token::Kind> Lexer::keywords = {
     {"struct", Token::KEYWORD_STRUCT},
     {"static", Token::KEYWORD_STATIC},
     {"sizeof", Token::KEYWORD_SIZEOF},
+    {"_Alignof", Token::KEYWORD_ALIGNOF},
     {"signed", Token::KEYWORD_SIGNED},
     {"short", Token::KEYWORD_SHORT},
     {"return", Token::KEYWORD_RETURN},
@@ -72,7 +73,7 @@ std::unordered_map<std::string_view, Token::Kind> Lexer::keywords = {
     {"case", Token::KEYWORD_CASE},
     {"break", Token::KEYWORD_BREAK},
     {"auto", Token::KEYWORD_AUTO},
-    {"_Bool", Token::KEYWORD__BOOL},
+    {"_Bool", Token::KEYWORD_BOOL},
     {"u8", Token::LITERAL_STR},
     {"u", Token::LITERAL_CHAR},
     {"U", Token::LITERAL_CHAR},
@@ -390,8 +391,10 @@ const char *Token::kindName(Kind kind) {
     return "volatile";
   case KEYWORD_WHILE:
     return "while";
-  case KEYWORD__BOOL:
-    return "_Bool";
+  case KEYWORD_BOOL:
+    return "bool";
+  case KEYWORD_ALIGNOF:
+    return "alignof";
   case PUNCT_SEMICOLON:
     return ";";
   case PUNCT_COLON:

@@ -17,6 +17,12 @@ public:
 
   void visitVar(VarAST &ast) { std::cout << "Var(" << ast.ident << ")"; }
 
+  void visitType(TypeAST &ast) {
+    std::cout << "Type(";
+    printType(ast.type);
+    std::cout << ")";
+  }
+
   void visitIntConst(IntConstAST &ast) {
     std::cout << "IntConst(";
     printType(ast.type);

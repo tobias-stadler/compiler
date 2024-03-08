@@ -198,7 +198,7 @@ constexpr bool precedenceRightAssoc(Precedence prec) {
 auto getTypeSpecSets() {
   std::vector<std::pair<std::vector<Token::Kind>, Type::Kind>> typeSpecSets{
       {{Token::KEYWORD_VOID}, Type::VOID},
-      {{Token::KEYWORD__BOOL}, Type::BOOL},
+      {{Token::KEYWORD_BOOL}, Type::BOOL},
 
       {{Token::KEYWORD_CHAR}, Type::SCHAR},
       {{Token::KEYWORD_CHAR, Token::KEYWORD_SIGNED}, Type::SCHAR},
@@ -264,7 +264,7 @@ ASTResult<Type *> Parser::parseTypeName() {
   return decl->type;
 }
 
-ASTPtrResult Parser::parseUnary() {
+ASTPtrResult Parser::parseUnary(bool enableCast) {
   Token::Kind tokKind = lex.peekKind();
   AST::Ptr res;
   switch (tokKind) {
@@ -273,25 +273,36 @@ ASTPtrResult Parser::parseUnary() {
     auto tyRes = parseTypeName();
     P_AST_EXPECT_OR_NOP(tyRes);
     if (tyRes) {
-      // Type cast
+      // Type cast disambiguation
       P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
       if (lex.matchPeek(Token::PUNCT_CURLYO)) {
         // Compound literal
         auto initRes = parseInitializerList();
-        P_AST_EXPECT(initRes, "compund literal initializer");
+        P_AST_EXPECT(initRes, "compound literal initializer");
         res = std::make_unique<CastAST>(initRes.moveRes(), tyRes.res());
         break;
       }
+      if (!enableCast) {
+        return std::make_unique<TypeAST>(tyRes.res());
+      }
       auto subExpr = parseUnary();
       P_AST_EXPECT(subExpr, "unary expression after cast operator");
-      res = std::make_unique<CastAST>(subExpr.moveRes(), tyRes.res());
-      break;
+      return std::make_unique<CastAST>(subExpr.moveRes(), tyRes.res());
     }
     auto ex = parseExpression();
     P_AST_EXPECT(ex, "expression");
     P_TOK_EXPECT_NEXT(Token::PUNCT_PARENC);
     res = ex.moveRes();
     break;
+  }
+  case Token::KEYWORD_SIZEOF:
+  case Token::KEYWORD_ALIGNOF: {
+    lex.drop();
+    auto expr = parseUnary(false);
+    P_AST_EXPECT(expr, "unary expression or type after sizeof/alignof");
+    return std::make_unique<UnopAST>(
+        tokKind == Token::KEYWORD_SIZEOF ? AST::SIZEOF : AST::ALIGNOF,
+        expr.moveRes());
   }
   case Token::IDENTIFIER: {
     res = std::make_unique<VarAST>(std::string_view(lex.next()));
@@ -630,6 +641,8 @@ ASTPtrResult Parser::parseInitializerList() {
     auto &entry = res->entries.emplace_back();
     if (lex.matchPeek(Token::PUNCT_SQUAREO) ||
         lex.matchPeek(Token::PUNCT_DOT)) {
+      // FIXME: illegal, because [] postfix operator is converted to pointer add
+      // TODO: parse manually
       auto designation = parsePostfix(nullptr);
       P_AST_EXPECT(designation, "designation");
       entry.designation = designation.moveRes();
@@ -991,7 +1004,7 @@ ASTResult<DeclSpec> Parser::parseDeclSpec(bool enableTypeSpec,
     case Token::KEYWORD_LONG:
     case Token::KEYWORD_UNSIGNED:
     case Token::KEYWORD_SIGNED:
-    case Token::KEYWORD__BOOL:
+    case Token::KEYWORD_BOOL:
       if (enableTypeSpec) {
         typeSpecs.push_back(kind);
         lex.drop();

@@ -60,6 +60,8 @@ public:
     ASSIGN_RSHIFT,
     TERNARY,
     COMMA,
+    SIZEOF,
+    ALIGNOF,
     PLUS,
     MINUS,
     ADD,
@@ -87,6 +89,7 @@ public:
     CAST,
     ADDR,
     VAR,
+    TYPE,
     CONST_INT,
     EQ,
     NEQ,
@@ -248,6 +251,12 @@ public:
       return "Ternary";
     case INITIALIZER_LIST:
       return "InitializerList";
+    case SIZEOF:
+      return "Sizeof";
+    case ALIGNOF:
+      return "Alignof";
+    case TYPE:
+      return "Type";
     }
     return "unnamed";
   }
@@ -279,6 +288,12 @@ public:
   AST &getRHS() { return *rhs; }
 
   Ptr lhs, rhs;
+};
+
+class TypeAST : public AST {
+public:
+  TypeAST(Type *type) : AST(TYPE), type(type) {}
+  Type *type;
 };
 
 class InitializerListAST : public AST {

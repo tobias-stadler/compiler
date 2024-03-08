@@ -64,6 +64,8 @@ public:
     case AST::LOG_NOT:
     case AST::PLUS:
     case AST::MINUS:
+    case AST::SIZEOF:
+    case AST::ALIGNOF:
       VISIT_DELEGATE(Unop);
       break;
     case AST::VAR:
@@ -133,6 +135,9 @@ public:
     case AST::INITIALIZER_LIST:
       VISIT_DELEGATE(InitializerList);
       break;
+    case AST::TYPE:
+      VISIT_DELEGATE(Type);
+      break;
     }
   }
 
@@ -166,6 +171,7 @@ protected:
   void visitSwitchSt(SwitchStAST &ast) { impl().visit(ast); }
   void visitTernary(TernaryAST &ast) { impl().visit(ast); }
   void visitInitializerList(InitializerListAST &ast) { impl().visit(ast); }
+  void visitType(TypeAST &ast) { impl().visit(ast); }
 };
 
 } // namespace c

@@ -80,7 +80,7 @@ public:
   ASTPtrResult parseInitializer();
   ASTPtrResult parseInitializerList();
   ASTResult<Type *> parseTypeName();
-  ASTPtrResult parseUnary();
+  ASTPtrResult parseUnary(bool enableCast = true);
   ASTPtrResult parsePostfix(AST::Ptr base);
 
   ASTPtrResult parseDeclaration();

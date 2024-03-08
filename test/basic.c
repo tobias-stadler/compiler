@@ -32,6 +32,7 @@ int main() {
   }
 
   struct goofy nah = (struct goofy){.x = 3};
+  int n2 = sizeof(int) * x;
 
   do
     x += 3;
