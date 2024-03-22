@@ -216,6 +216,8 @@ public:
       return PUNCT_PERCENT;
     case '?':
       return PUNCT_QUESTION;
+    case '#':
+      return PUNCT_HASH;
     }
     return INVALID;
   }
@@ -231,17 +233,20 @@ public:
   }
 
   operator std::string_view() const {
-    if (text == nullptr)
-      return {};
+    assert(isValidString());
     return {text, textLen};
   }
 
   bool isEmpty() const;
   bool isInvalid() const;
   bool isEnd() const;
+  bool isNewLine() const;
   bool isKeyword() const;
   bool isPunctuator() const;
   bool isWhiteSpace() const { return isWhiteSpace(kind); }
+  bool isWhiteSpaceExceptNewLine() const {
+    return kind == SPACE || kind == COMMENT;
+  }
 
   bool isValidString() const;
 };
@@ -327,6 +332,15 @@ private:
       switch (kind) {
       case Token::PUNCT_EQ:
         currTok.kind = Token::PUNCT_EQEQ;
+        eatChar();
+        return;
+      default:
+        return;
+      }
+    } else if constexpr (BASE == Token::PUNCT_HASH) {
+      switch (kind) {
+      case Token::PUNCT_HASH:
+        currTok.kind = Token::PUNCT_HASHHASH;
         eatChar();
         return;
       default:

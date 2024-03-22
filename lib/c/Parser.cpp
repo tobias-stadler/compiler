@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cerrno>
 #include <charconv>
+#include <cinttypes>
 #include <format>
 #include <memory>
 #include <string>
@@ -308,9 +310,12 @@ ASTPtrResult Parser::parseUnary(bool enableCast) {
     res = std::make_unique<VarAST>(std::string_view(lex.next()));
     break;
   }
-  case Token::PP_NUM:
-    res = parseLiteralNum();
+  case Token::PP_NUM: {
+    auto num = parseLiteralNum();
+    P_AST_EXPECT(num, "number literal");
+    res = num.moveRes();
     break;
+  }
   default: {
     AST::Kind unopKind = tokenUnopKind(tokKind);
     if (unopKind == AST::EMPTY) {
@@ -377,7 +382,7 @@ ASTPtrResult Parser::parseStatement() {
   case Token::KEYWORD_GOTO: {
     lex.drop();
     P_TOK_EXPECT_PEEK(Token::IDENTIFIER);
-    std::string_view ident = lex.next();
+    std::string_view ident(lex.next());
     P_TOK_EXPECT_NEXT(Token::PUNCT_SEMICOLON);
     return std::make_unique<GotoStAST>(ident);
   }
@@ -531,11 +536,12 @@ ASTError Parser::error(std::string_view str) {
 ASTPtrResult Parser::parseLiteralNum() {
   P_TOK_EXPECT_PEEK(Token::PP_NUM);
   Token tok = lex.next();
-  std::string_view str(tok);
-  uint64_t num;
-  auto res = std::from_chars(str.data(), str.data() + str.size(), num);
-  if (res.ec != std::errc{}) {
-    return error("Invalid num");
+  std::string str(tok);
+  char *ptr = nullptr;
+  errno = 0;
+  auto num = std::strtoumax(str.c_str(), &ptr, 0);
+  if (errno || ptr != str.c_str() + str.size()) {
+    return errorExpectedToken("valid number literal", tok);
   }
   return new IntConstAST(MInt{32, num}, &ctx.make_type<BasicType>(Type::SINT));
 }
@@ -841,7 +847,7 @@ ASTResult<Type *> Parser::parseStruct() {
   std::string_view name;
   Type *res = nullptr;
   if (lex.matchPeek(Token::IDENTIFIER)) {
-    name = lex.next();
+    name = std::string_view(lex.next());
     if (auto *s = sym.getSymbol(name, Symbol::Namespace::TAG)) {
       res = &s->getType();
       if (!((isUnion && res->getKind() == Type::UNION) ||

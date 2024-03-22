@@ -35,7 +35,7 @@ int main() {
   int n2 = sizeof(int) * x;
 
   do
-    x += 3;
+    x += -0xff;
   while (x);
 
   struct goofy *(*gf)(int);
@@ -45,5 +45,29 @@ int main() {
   s.x = 69;
   s.x++;
   (&s)->y = 42;
-  return 0;
+#define C A + B
+#define A 69
+#define B 42
+#define FUNC(a,b) a + b
+
+return 0
+#ifdef A
+  + 1
+#ifndef B
+  + 2
+#else
+  + 3
+#endif
+  + 4
+#else
+  + 5
+#ifdef B
+  + 6
+#endif
+  + 7
+#endif
+  ;
+
+#undef B
+  return FUNC  ( A , B );
 }
