@@ -2,10 +2,14 @@
 
 #include "c/Lexer.h"
 #include "support/Utility.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string_view>
 #include <vector>
 
@@ -53,8 +57,55 @@ public:
 
 class PPTranslationUnit {
 public:
-  Lexer lex;
+  std::filesystem::path path;
   std::string content;
+  std::vector<const char *> newlines;
+  bool done = false;
+
+  static std::optional<PPTranslationUnit> load(std::filesystem::path filePath) {
+    PPTranslationUnit res;
+    res.path = filePath;
+    std::ifstream f(filePath);
+    if (!f.good()) {
+      return std::nullopt;
+    }
+    auto sz = std::filesystem::file_size(filePath);
+    res.content = std::string(sz, 0);
+    f.read(res.content.data(), sz);
+    return res;
+  }
+
+  struct LineRange {
+    size_t begin;
+    size_t end;
+  };
+
+  std::optional<std::string_view> getLine(size_t n) {
+    if (n >= newlines.size()) {
+      return std::nullopt;
+    }
+    const char *end = newlines[n] - 1;
+    const char *begin = n > 0 ? newlines[n - 1] + 1 : content.data();
+    return std::string_view(begin, end);
+  }
+
+  std::optional<LineRange> getLineRange(std::string_view str) {
+    auto itBegin =
+        std::lower_bound(newlines.begin(), newlines.end(), str.data());
+    auto itEnd = std::lower_bound(newlines.begin(), newlines.end(),
+                                  str.data() + str.size());
+    if (itBegin == newlines.end()) {
+      return std::nullopt;
+    }
+    LineRange r;
+    r.begin = std::distance(newlines.begin(), itBegin);
+    if (itEnd == newlines.end()) {
+      r.end = newlines.size();
+    } else {
+      r.end = std::distance(newlines.begin(), itEnd);
+    }
+    return r;
+  }
 };
 
 enum class PPDirective {
@@ -131,7 +182,7 @@ private:
 template <typename BoT>
 class LL1LexerAdapter : public LL1Lexer<LL1LexerAdapter<BoT>> {
 public:
-  LL1LexerAdapter(BoT &backOff) : backOff(backOff) { next(); }
+  LL1LexerAdapter(BoT &backOff) : backOff(backOff) {}
 
   Token next() {
     Token tok = currTok;
@@ -146,43 +197,134 @@ public:
   Token currTok;
 };
 
+class IncludeLexer {
+public:
+  IncludeLexer() {}
+
+  Token next() {
+    if (includeStack.empty()) {
+      return Token(Token::END);
+    }
+    Include &inc = includeStack.back();
+    Token tok = inc.lex.next();
+    if (tok.isEnd()) {
+      inc.tu.done = true;
+      includeStack.pop_back();
+      return next();
+    }
+    if (tok.isNewLine() && !inc.tu.done) {
+      inc.tu.newlines.push_back(tok.text);
+    }
+    return tok;
+  }
+
+  bool includeHeaderName(std::string_view headerName, bool enableLocal) {
+    if (enableLocal) {
+      if (includePath(currInclude().tu.path.parent_path() / headerName)) {
+        return true;
+      }
+    }
+    for (auto &basePath : basePaths) {
+      if (includePath(basePath / headerName)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool includePath(std::filesystem::path path) {
+    auto canPath = std::filesystem::weakly_canonical(path);
+    std::cerr << "Trying to include: " << path << " (" << canPath << ")\n";
+    auto it = translationUnits.find(canPath);
+    if (it != translationUnits.end()) {
+      includeStack.emplace_back(it->second);
+      return true;
+    }
+    auto newTu = PPTranslationUnit::load(canPath);
+    if (!newTu) {
+      return false;
+    }
+    auto [itNew, _] =
+        translationUnits.try_emplace(newTu->path, std::move(newTu.value()));
+    includeStack.emplace_back(itNew->second);
+    return true;
+  }
+
+  struct Include {
+    Include(PPTranslationUnit &tu) : tu(tu), lex(tu.content) {}
+
+    PPTranslationUnit &tu;
+    Lexer lex;
+  };
+
+  Include &currInclude() {
+    assert(!includeStack.empty());
+    return includeStack.back();
+  }
+
+  struct LineRange {
+    PPTranslationUnit &tu;
+    PPTranslationUnit::LineRange range;
+  };
+
+  std::optional<LineRange> getLineRange(std::string_view str) {
+    for (auto &[_, tu] : translationUnits) {
+      auto r = tu.getLineRange(str);
+      if (r) {
+        return LineRange{tu, r.value()};
+      }
+    }
+    return std::nullopt;
+  }
+
+  std::vector<Include> includeStack;
+
+  std::vector<std::filesystem::path> basePaths;
+
+  std::unordered_map<std::string, PPTranslationUnit> translationUnits;
+};
+
 template <typename BoT>
 class StackLexerAdapter : public LL1Lexer<StackLexerAdapter<BoT>> {
 public:
   StackLexerAdapter(BoT *backOff) : backOff(backOff) {}
 
   Token peek() {
-    if (stack.empty()) {
+    if (tokStack.empty()) {
       if (backOff) {
         return backOff->peek();
       } else {
         return Token(Token::END);
       }
     }
-    return stack.back();
+    return tokStack.back();
   }
 
   Token next() {
-    if (stack.empty()) {
+    if (tokStack.empty()) {
       if (backOff) {
         return backOff->next();
       } else {
         return Token(Token::END);
       }
     }
-    Token tok = stack.back();
-    stack.pop_back();
+    Token tok = tokStack.back();
+    tokStack.pop_back();
     return tok;
   }
 
   BoT *backOff;
 
-  std::vector<Token> stack;
+  std::vector<Token> tokStack;
 };
 
 class PPLexer : public LL1Lexer<PPLexer> {
 public:
-  PPLexer(Lexer &lex) : lex(lex) { getToken(); }
+  using Lex = LL1LexerAdapter<IncludeLexer>;
+  PPLexer(IncludeLexer &incLex) : incLex(incLex), lex(incLex) {
+    lex.next();
+    getToken();
+  }
 
   Token next() {
     Token tok = currTok;
@@ -190,6 +332,17 @@ public:
     return tok;
   }
   Token peek() { return currTok; }
+
+  void printErrCtx(std::ostream &os, std::string_view str) {
+    os << "Source context: ";
+    auto r = incLex.getLineRange(str);
+    if (!r) {
+      os << "(unavailable)\n";
+      return;
+    }
+    os << r.value().tu.path << ":" << r.value().range.begin << "-"
+       << r.value().range.end;
+  }
 
 private:
   void getToken();
@@ -212,11 +365,13 @@ private:
       lex.dropLine();
       return true;
     }
-    auto it = ppKeywords.find(
-        std::string_view(lex.nextSkipWhiteSpaceExceptNewLine()));
+    auto it = ppKeywords.find(std::string_view(lex.peek()));
     if (it == ppKeywords.end()) {
       lex.dropLine();
       return true;
+    }
+    if (it->second != PPDirective::INCLUDE) {
+      lex.nextSkipWhiteSpaceExceptNewLine();
     }
     switch (it->second) {
     case PPDirective::IFNDEF:
@@ -343,7 +498,29 @@ private:
       case PPDirective::ELSE:
       case PPDirective::ENDIF:
         break;
-      case PPDirective::INCLUDE:
+      case PPDirective::INCLUDE: {
+        incLex.currInclude().lex.setEnableHeaderNames(true);
+        lex.nextSkipWhiteSpaceExceptNewLine();
+        if (!lex.matchPeek(Token::HEADER_NAME)) {
+          errorExpectedToken(Token::HEADER_NAME);
+          return false;
+        }
+        incLex.currInclude().lex.setEnableHeaderNames(false);
+        Token tok = lex.nextSkipWhiteSpaceExceptNewLine();
+        if (!lex.matchPeek(Token::NEWLINE)) {
+          errorExpectedToken(Token::NEWLINE);
+          return false;
+        }
+        std::string_view hdrName = tok;
+        hdrName.remove_prefix(1);
+        hdrName.remove_suffix(1);
+        if (!incLex.includeHeaderName(hdrName, tok.text[0] == '"')) {
+          error("Couldn't open file");
+          return false;
+        }
+        lex.drop();
+        return true;
+      }
       case PPDirective::LINE:
       case PPDirective::ERROR:
       case PPDirective::PRAGMA:
@@ -360,9 +537,8 @@ private:
 
   struct ReplacementCtx {
     PPLexer &pp;
-    ReplacementCtx(PPLexer &pp, LL1LexerAdapter<Lexer> *lex)
-        : pp(pp), lex(lex) {}
-    StackLexerAdapter<LL1LexerAdapter<Lexer>> lex;
+    ReplacementCtx(PPLexer &pp, Lex *lex) : pp(pp), lex(lex) {}
+    StackLexerAdapter<Lex> lex;
     std::vector<Token> out;
 
     std::vector<Token> gobbleArgument() {
@@ -435,7 +611,8 @@ private:
         }
         for (auto &arg : args) {
           ReplacementCtx ctx{pp, nullptr};
-          ctx.lex.stack.insert(ctx.lex.stack.end(), arg.rbegin(), arg.rend());
+          ctx.lex.tokStack.insert(ctx.lex.tokStack.end(), arg.rbegin(),
+                                  arg.rend());
           ctx.handleAll();
           arg = std::move(ctx.out);
         }
@@ -447,23 +624,24 @@ private:
           if (tok.kind == Token::IDENTIFIER) {
             auto paramIt = s->paramIndex.find(tok);
             if (paramIt != s->paramIndex.end()) {
-              lex.stack.insert(lex.stack.end(), args[paramIt->second].rbegin(),
-                               args[paramIt->second].rend());
+              lex.tokStack.insert(lex.tokStack.end(),
+                                  args[paramIt->second].rbegin(),
+                                  args[paramIt->second].rend());
               continue;
             }
           }
-          lex.stack.push_back(tok);
+          lex.tokStack.push_back(tok);
         }
       } else {
         for (auto it = s->replacementList.rbegin(),
                   itEnd = s->replacementList.rend();
              it != itEnd; ++it) {
-          lex.stack.push_back(*it);
+          lex.tokStack.push_back(*it);
         }
       }
     }
 
-    void emitInvalid() { lex.stack.push_back(Token::INVALID); }
+    void emitInvalid() { lex.tokStack.push_back(Token::INVALID); }
   };
 
   void errorExpectedToken(std::string_view str) {
@@ -497,7 +675,7 @@ private:
   }
 
   static void trimWhiteSpaceBack(std::vector<Token> &toks) {
-    while (toks.back().isWhiteSpace()) {
+    while (!toks.empty() && toks.back().isWhiteSpace()) {
       toks.pop_back();
     }
   }
@@ -512,7 +690,8 @@ private:
     currTok.kind = it->second;
   }
 
-  LL1LexerAdapter<Lexer> lex;
+  IncludeLexer &incLex;
+  Lex lex;
   ReplacementCtx ctx{*this, &lex};
   Token currTok;
   PPSymbolTable sym;

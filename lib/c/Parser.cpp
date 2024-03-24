@@ -11,6 +11,7 @@
 #include <charconv>
 #include <cinttypes>
 #include <format>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -530,6 +531,8 @@ ASTPtrResult Parser::parseStatement() {
 ASTError Parser::error(std::string_view str) {
   log.freeze();
   std::cerr << "[Error][Parser] " << str << '\n';
+  lex.printErrCtx(std::cerr, lex.peek());
+  std::cerr << "\n";
   return ASTError(ASTError::OTHER);
 }
 
@@ -1175,6 +1178,7 @@ ASTError Parser::errorExpectedToken(std::string_view str, Token tok) {
 
   std::cerr << "[Error][Parser] Expected " << str << ", but got " << tok
             << '\n';
+  lex.printErrCtx(std::cerr, tok);
 
   return ASTError(ASTError::EXPECTED_TOKEN);
 }

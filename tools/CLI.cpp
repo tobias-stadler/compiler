@@ -28,20 +28,11 @@ int main(int argc, char *argv[]) {
     std::cerr << "Expected filename" << std::endl;
     return EXIT_FAILURE;
   }
-  std::ifstream f(argv[1], std::ios::ate);
-  if (!f.good()) {
-    std::cerr << "Couldn't open file" << std::endl;
-    return EXIT_FAILURE;
-  }
+  c::IncludeLexer incLex;
+  incLex.basePaths.push_back("/usr/include");
+  incLex.includePath(argv[1]);
 
-  auto sz = f.tellg();
-  f.seekg(0);
-  std::string str;
-  str.resize(sz);
-  f.read(str.data(), sz);
-
-  c::Lexer lex(str);
-  c::PPLexer pplex(lex);
+  c::PPLexer pplex(incLex);
   c::ASTContext ctx;
   c::SymbolTable sym;
   c::Parser p(ctx, pplex, sym);

@@ -1,3 +1,5 @@
+#include "basic.h"
+
 static int global_x;
 
 int do_sth(int a, int b) { return a + b; }
@@ -48,26 +50,26 @@ int main() {
 #define C A + B
 #define A 69
 #define B 42
-#define FUNC(a,b) a + b
+#define FUNC(a, b) a + b
 
-return 0
+  return 0
 #ifdef A
-  + 1
+         + 1
 #ifndef B
-  + 2
+         + 2
 #else
-  + 3
+         + 3
 #endif
-  + 4
+         + 4
 #else
-  + 5
+         + 5
 #ifdef B
-  + 6
+         + 6
 #endif
-  + 7
+         + 7
 #endif
-  ;
+      ;
 
 #undef B
-  return FUNC  ( A , B );
+  return FUNC(A, B);
 }
