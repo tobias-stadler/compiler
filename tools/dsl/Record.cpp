@@ -4,6 +4,7 @@
 #include <cassert>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <string_view>
 
 RecordFactory TemplateRecord::facImpl{
@@ -12,6 +13,7 @@ RecordFactory TemplateRecord::facImpl{
 };
 
 void TokenRecord::parse(Lexer &lex) {
+  tokSrc = &lex.tokSrc;
   unsigned braces = 1;
   while (true) {
     switch (lex.peekKind()) {
@@ -99,8 +101,8 @@ void IncludeRecord::parse(Lexer &lex) {
 }
 
 void IncludeRecord::parseContent() {
-  StringTokenSource tokSrc(content);
-  Lexer childLex(tokSrc);
+  tokSrc = std::make_unique<StringTokenSource>(content);
+  Lexer childLex(*tokSrc);
   RecordSpace::parse(childLex);
 
   gather(usingRecs, "using");
@@ -280,4 +282,11 @@ Record *IncludeRecord::getRecordFromUsedRecs(std::string_view recName) {
     }
   }
   return nullptr;
+}
+
+void TemplatedTokenSource::dump(Token tok) {
+  if (tokRec.tokSrc)
+    tokRec.tokSrc->dump(tok);
+  if (subTokRec && subTokRec->tokSrc)
+    subTokRec->tokSrc->dump(tok);
 }

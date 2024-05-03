@@ -200,10 +200,20 @@ public:
     return {newN, word};
   }
 
+  bool canSTrunc(unsigned newN) const { return trunc(newN).sext(n) == *this; }
+  bool canZTrunc(unsigned newN) const { return trunc(newN).zext(n) == *this; }
+
+  bool isZero() const { return zero(n) == *this; }
+  bool isOne() const { return one(n) == *this; }
+  bool isOnes() const { return ones(n) == *this; }
+  bool isNegOne() const { return negOne(n) == *this; }
+
+  int32_t toInt32() { return getMWordSignedSext(); }
+
   static MInt one(unsigned n) { return {n, 1}; }
   static MInt zero(unsigned n) { return {n, 0}; }
   static MInt ones(unsigned n) { return ~MInt{n, 0}; }
-  static MInt negOne(unsigned n) { return one(n); }
+  static MInt negOne(unsigned n) { return -one(n); }
 
   static MInt lowerOnes(unsigned n, unsigned setN) {
     assert(setN <= n);

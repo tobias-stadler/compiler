@@ -1,9 +1,12 @@
 #include "Lexer.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <format>
 #include <iostream>
+#include <iterator>
 #include <regex>
+#include <string_view>
 
 void error(std::string_view err) {
   std::cerr << "[Error] " << err << std::endl;
@@ -97,6 +100,9 @@ bool StringTokenSource::eatWhitespace() {
       return false;
     }
     if (isspace(*pos)) {
+      if (*pos == '\n') {
+        newlines.push_back(std::string_view(pos, pos).data());
+      }
       ++pos;
     } else {
       return true;
@@ -223,4 +229,25 @@ std::vector<Token> Lexer::expectCode() {
       break;
     }
   }
+}
+
+std::optional<size_t> StringTokenSource::getLineNum(std::string_view str) {
+  auto it = std::lower_bound(newlines.begin(), newlines.end(), str.data());
+  if (it == newlines.end()) {
+    return std::nullopt;
+  }
+  return std::distance(newlines.begin(), it);
+}
+
+void Lexer::error(std::string_view err, Token tok) {
+  tokSrc.dump(tok);
+  ::error(std::format("[Lexer] {}", err));
+}
+
+void StringTokenSource::dump(Token tok) {
+  auto line = getLineNum(tok);
+  if (!line)
+    return;
+  std::cerr << "Token '" << std::string_view(tok) << "' on line: " << *line + 1
+            << "\n";
 }

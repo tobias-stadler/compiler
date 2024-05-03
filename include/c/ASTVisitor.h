@@ -7,7 +7,7 @@
 
 namespace c {
 
-template <class D> class ASTVisitor {
+template <typename Derived, typename Ret = void> class ASTVisitor {
 
 public:
   void dispatch(AST *ast) {
@@ -142,7 +142,7 @@ public:
   }
 
 protected:
-  D &impl() { return static_cast<D &>(*this); }
+  Derived &impl() { return static_cast<Derived &>(*this); }
 
   void visitNullptr() {}
   void visit(AST &ast) { impl().visit(ast); }

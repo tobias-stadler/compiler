@@ -16,6 +16,7 @@ public:
       RECIDENT_USE,
       OP_PLACEHOLDER,
       IMM32,
+      MINT,
       COND_EQ,
       COND_NE,
       COND_LT,
@@ -33,8 +34,10 @@ public:
     Kind kind;
     std::string_view name;
     RecordIdent type;
+
     std::vector<Token> code;
     std::string_view num;
+    std::string_view num2;
     RecordIdent recIdent;
     bool isGenerated = false;
   };

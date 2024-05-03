@@ -3,6 +3,7 @@
 #include "ir/SSAType.h"
 #include "support/MachineInt.h"
 #include "support/RTTI.h"
+#include "support/Utility.h"
 #include <cassert>
 #include <functional>
 #include <iterator>
@@ -18,8 +19,11 @@ class Reg {
 public:
   friend class std::hash<Reg>;
   using num_t = unsigned;
+  static constexpr num_t vRegMsk = num_t(1) << (sizeof(num_t) * 8 - 1);
 
   constexpr Reg() : num(0) {}
+
+  static constexpr Reg vReg(num_t idx) { return Reg(idx).toVReg(); }
 
   constexpr Reg(num_t num) : num(num) {}
 
@@ -28,6 +32,12 @@ public:
   constexpr operator num_t() const { return num; }
 
   constexpr num_t getNum() const { return num; }
+  constexpr num_t getIdx() const { return num & ~vRegMsk; }
+
+  constexpr bool isVReg() { return num & vRegMsk; }
+  constexpr bool isPhysReg() { return !(num & vRegMsk); }
+
+  constexpr Reg toVReg() { return num | vRegMsk; }
 
 private:
   num_t num;
@@ -406,7 +416,8 @@ public:
     } else if constexpr (K == CHAIN) {
       new (&contentChain) OperandChain(std::forward<ARGS>(args)...);
     } else {
-      static_assert(false, "Operand kind cannot be emplaced with these args");
+      static_assert(dependent_false_v<ARGS...>,
+                    "Operand kind cannot be emplaced with these args");
     }
     kind = K;
   }

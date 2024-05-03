@@ -32,13 +32,14 @@ int main(int argc, char *argv[]) {
   incLex.basePaths.push_back("/usr/include");
   incLex.includePath(argv[1]);
 
-  c::PPLexer pplex(incLex);
   c::ASTContext ctx;
+  c::PPSymbolTable ppSym;
+  c::PPLexer ppLex(ctx, incLex, ppSym);
   c::SymbolTable sym;
-  c::Parser p(ctx, pplex, sym);
+  c::Parser p(ctx, ppLex, sym);
 
   auto ast = p.parseTranslationUnit();
-  if (!ast || pplex.peekKind() != c::Token::END) {
+  if (!ast || ppLex.peekKind() != c::Token::END) {
     p.printErrCtx(std::cerr);
     return EXIT_FAILURE;
   }
@@ -56,14 +57,16 @@ int main(int argc, char *argv[]) {
   riscv::InstrSelect isel;
 
   funcPipeline.addLazyPass(std::make_unique<DominatorTreePass>());
-  funcPipeline.addLazyPass(std::make_unique<LivenessFlowPass>());
+  funcPipeline.addLazyPass(std::make_unique<LiveFlowPass>());
   funcPipeline.addLazyPass(std::make_unique<LiveIntervalsPass>());
+  funcPipeline.addLazyPass(std::make_unique<LiveGraphPass>());
 
   funcPipeline.addPass(std::make_unique<PrintIRPass>());
-  // pipeline.addPass(std::make_unique<PrintIRPass>());
   // pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
-  bool doCodegen = false;
-  if (doCodegen) {
+  bool doISel = true;
+  bool doRegAlloc = true;
+  bool doAsmPrint = false;
+  if (doISel) {
     funcPipeline.addPass(std::make_unique<riscv::ABILoweringPass>());
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<InstrExpansionPass>(expansion));
@@ -71,24 +74,26 @@ int main(int argc, char *argv[]) {
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<InstrSelectPass>(isel));
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
+  }
+  if (doRegAlloc && doISel) {
     funcPipeline.addPass(std::make_unique<PhiIsolationPass>());
     funcPipeline.addPass(std::make_unique<RegTrackingPass>());
     funcPipeline.addPass(std::make_unique<PhiDestructionPass>());
 
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<PrintRegTrackingPass>());
-    funcPipeline.addPass(std::make_unique<PrintLivenessFlowPass>());
-    funcPipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
-    funcPipeline.addPass(std::make_unique<RegAllocPass>());
-    funcPipeline.addPass(std::make_unique<RegRewritePass>());
-    funcPipeline.addPass(std::make_unique<riscv::FrameLoweringPass>());
-    funcPipeline.addPass(std::make_unique<riscv::PostRALowering>());
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<PrintLiveGraphPass>());
+    // funcPipeline.addPass(std::make_unique<PrintLiveIntervalsPass>());
+    // funcPipeline.addPass(std::make_unique<RegAllocPass>());
+    // funcPipeline.addPass(std::make_unique<RegRewritePass>());
+    // funcPipeline.addPass(std::make_unique<riscv::FrameLoweringPass>());
+    // funcPipeline.addPass(std::make_unique<riscv::PostRALowering>());
+    // funcPipeline.addPass(std::make_unique<PrintIRPass>());
   }
 
   progPipeline.addPass(std::make_unique<FunctionPipelinePass>(funcPipeline));
 
-  if (doCodegen) {
+  if (doRegAlloc && doISel && doAsmPrint) {
     progPipeline.addPass(std::make_unique<riscv::AsmPrinterPass>(std::cout));
   }
 

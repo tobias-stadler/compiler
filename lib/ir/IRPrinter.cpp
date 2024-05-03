@@ -50,6 +50,10 @@ void PrintIRVisitor::printSSAType(SSAType &type) {
 }
 
 void PrintIRVisitor::printReg(Reg reg) {
+  if (reg.isVReg()) {
+    std::cout << "@" << reg.getIdx();
+    return;
+  }
   if (arch) {
     const ArchReg *archReg = arch->getArchReg(reg);
     if (archReg) {
@@ -57,7 +61,7 @@ void PrintIRVisitor::printReg(Reg reg) {
       return;
     }
   }
-  std::cout << "@" << reg.getNum();
+  std::cout << "reg(" << reg.getNum() << ")";
 }
 
 void PrintIRVisitor::printRegClass(unsigned kind) {
@@ -153,6 +157,10 @@ void PrintIRVisitor::visitOperand(Operand &op) {
   }
   case Operand::BRCOND:
     std::cout << BrCond::kindName(op.brCond().getKind());
+    break;
+  case Operand::MINT:
+    std::cout << "MInt(" << op.mInt().getBits() << ","
+              << op.mInt().getMWordZext() << ")";
     break;
   default:
     UNREACHABLE("Illegal operand kind");

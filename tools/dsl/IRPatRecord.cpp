@@ -59,6 +59,17 @@ IRPatternRecord::InstrPat IRPatternRecord::InstrPat::parse(Lexer &lex) {
           op.code = lex.expectCode();
         }
         lex.expectNext(Token::PARENC);
+      } else if (lex.matchIdentNext("MInt")) {
+        op.kind = OperandPat::MINT;
+        lex.expectNext(Token::PARENO);
+        op.num2 = lex.expectNext(Token::IDENT);
+        lex.expectNext(Token::COMMA);
+        if (lex.match(Token::IDENT)) {
+          op.num = lex.expectNext(Token::IDENT);
+        } else {
+          op.code = lex.expectCode();
+        }
+        lex.expectNext(Token::PARENC);
       } else {
         op.kind = OperandPat::RECIDENT_USE;
         op.recIdent = lex.expectRecordIdent();
@@ -167,6 +178,11 @@ void IRPatternRecord::genInstrMatch(InstrPat &instrPat,
           std::format("if({}.getOperand({}).imm32() != {}) return false;",
                       instrVar, opNum, op.num));
       break;
+    case OperandPat::MINT:
+      code.println(std::format(
+          "if({}.getOperand({}).mInt() != MInt{{{}, {}}}) return false;",
+          instrVar, opNum, op.num2, op.num));
+      break;
     case OperandPat::RECIDENT_DEF:
     case OperandPat::RECIDENT_USE:
       error("Unsupported operand pattern in match");
@@ -233,6 +249,12 @@ void IRPatternRecord::genEmit(InstrPats &pats, CodeBuilder &code) {
         code.println(std::format(
             "e_instr_{}->emplaceOperand<Operand::IMM32>({});", instrNum,
             op.code.size() > 0 ? genCode(op.code) : op.num));
+        break;
+      }
+      case OperandPat::MINT: {
+        code.println(std::format(
+            "e_instr_{}->emplaceOperand<Operand::MInt>({},{});", instrNum,
+            op.num2, op.code.size() > 0 ? genCode(op.code) : op.num));
         break;
       }
       case OperandPat::COND_EQ:

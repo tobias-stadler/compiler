@@ -70,6 +70,5 @@ int main() {
 #endif
       ;
 
-#undef B
   return FUNC(A, B);
 }

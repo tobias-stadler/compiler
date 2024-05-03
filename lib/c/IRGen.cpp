@@ -106,19 +106,19 @@ private:
   std::unordered_map<SymbolId, StorageInfo> slots;
 };
 
-class ExprState {
-public:
-  ExprState(Symbol *tmpSymbol, Operand *tmpOperand, ExpressionSemantics sema)
-      : tmpSymbol(tmpSymbol), tmpOperand(tmpOperand), sema(std::move(sema)) {}
-
-  Symbol *tmpSymbol;
-  Operand *tmpOperand;
-  ExpressionSemantics sema;
-};
-
 class IRGenASTVisitor : public ASTVisitor<IRGenASTVisitor>,
                         public ExpressionSemantics::Handler {
 public:
+  class ExprState {
+  public:
+    ExprState(Symbol *tmpSymbol, Operand *tmpOperand, ExpressionSemantics sema)
+        : tmpSymbol(tmpSymbol), tmpOperand(tmpOperand), sema(std::move(sema)) {}
+
+    Symbol *tmpSymbol;
+    Operand *tmpOperand;
+    ExpressionSemantics sema;
+  };
+
   IRGenASTVisitor(ASTContext &ctx, SymbolTable &sym)
       : ExpressionSemantics::Handler(ctx), sema(*this), storage(ir), sym(sym) {}
 
@@ -619,7 +619,7 @@ public:
 
   IRBuilder ir;
   StorageBuilder storage;
-  SymbolTable sym;
+  SymbolTable &sym;
   MemoryLayout mem;
 };
 } // namespace

@@ -1,6 +1,6 @@
 #pragma once
 #include "c/AST.h"
-#include "c/PPLexer.h"
+#include "c/Preprocessor.h"
 #include "c/Symbol.h"
 #include "c/Type.h"
 #include "support/ErrorRecovery.h"

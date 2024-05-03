@@ -4,13 +4,14 @@
 #include "ir/IRPrinter.h"
 #include "ir/InstrBuilder.h"
 #include "ir/RegTracking.h"
+#include "support/DynBitSet.h"
 #include <cassert>
 #include <compare>
 #include <iostream>
 #include <ranges>
 #include <unordered_set>
 
-class BlockLivenessFlow {
+class BlockLiveFlow {
 public:
   std::unordered_set<Reg> liveIn;
   std::unordered_set<Reg> liveOut;
@@ -18,18 +19,18 @@ public:
   std::unordered_set<Reg> defs;
 };
 
-class LivenessFlow {
+class LiveFlow {
 public:
   static const IRInfoID ID;
-  std::unordered_map<Block *, BlockLivenessFlow> blockLiveness;
+  std::unordered_map<Block *, BlockLiveFlow> blockLive;
 };
 
-class LivenessFlowPass : public IRPass<Function> {
+class LiveFlowPass : public IRPass<Function> {
 public:
-  const char *name() override { return "LivenessFlowPass"; }
+  const char *name() override { return "LiveFlowPass"; }
 
   void run(Function &func, IRInfo<Function> &info) override {
-    data.blockLiveness.clear();
+    data.blockLive.clear();
     arch = &info.getArch();
     regTrack = &info.query<RegTracking>();
 
@@ -49,12 +50,12 @@ public:
 
   void precomputeBlock(Block &block) {
     std::unordered_set<Reg> regExposed;
-    auto &blockLive = data.blockLiveness[&block];
+    auto &blockLive = data.blockLive[&block];
     for (auto &instr : block | std::views::reverse) {
       if (instr.isPhi()) {
         auto phi = PhiInstrPtr(&instr);
         for (int i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
-          auto &predBlockLive = data.blockLiveness[&phi.getPredecessorBlock(i)];
+          auto &predBlockLive = data.blockLive[&phi.getPredecessorBlock(i)];
           predBlockLive.liveOutNew.push_back(
               regTrack->getRegForSSADef(phi.getPredecessorDef(i)));
         }
@@ -63,41 +64,42 @@ public:
         regExposed.erase(reg);
         continue;
       }
+
       for (auto &op : instr) {
-        if (op.isSSARegUse()) {
-          regExposed.insert(regTrack->getRegForSSADef(op.ssaUse().getDef()));
-        } else if (op.isSSARegDef()) {
-          Reg reg = regTrack->getRegForSSADef(op);
+        auto [reg, isDef] = regTrack->getRegForOperand(op);
+        if (!reg)
+          continue;
+        if (isDef) {
+          if (ignoreReg(*arch, reg))
+            continue;
           blockLive.defs.insert(reg);
           regExposed.erase(reg);
-        } else if (op.isRegUse()) {
-          if (ignoreReg(*arch, op.reg()))
+        } else {
+          if (ignoreReg(*arch, reg))
             continue;
-          regExposed.insert(op.reg());
-        } else if (op.isRegDef()) {
-          if (ignoreReg(*arch, op.reg()))
-            continue;
-          blockLive.defs.insert(op.reg());
-          regExposed.erase(op.reg());
+          regExposed.insert(reg);
         }
       }
     }
+
     blockLive.liveIn.insert(regExposed.begin(), regExposed.end());
     for (auto &blockUse : block.getDef().ssaDef()) {
       Block &pred = blockUse.getParentBlock();
-      auto &predBlockLive = data.blockLiveness[&pred];
+      auto &predBlockLive = data.blockLive[&pred];
       predBlockLive.liveOutNew.insert(predBlockLive.liveOutNew.end(),
                                       regExposed.begin(), regExposed.end());
     }
   }
 
   static bool ignoreReg(Arch &arch, Reg reg) {
+    if (reg.isVReg())
+      return false;
     const ArchReg *archReg = arch.getArchReg(reg);
     return archReg ? archReg->noLiveness : false;
   }
 
   void dataflowStep(Block &block, std::vector<Block *> &workList) {
-    auto &blockLive = data.blockLiveness[&block];
+    auto &blockLive = data.blockLive[&block];
     for (auto op : blockLive.liveOutNew) {
       if (!blockLive.liveOut.insert(op).second) {
         continue;
@@ -110,7 +112,7 @@ public:
       }
       for (auto &blockUse : block.getDef().ssaDef()) {
         Block &pred = blockUse.getParentBlock();
-        auto &predBlockLive = data.blockLiveness[&pred];
+        auto &predBlockLive = data.blockLive[&pred];
         predBlockLive.liveOutNew.push_back(op);
         workList.push_back(&pred);
       }
@@ -119,29 +121,29 @@ public:
   }
 
   void advertise(IRInfo<Function> &info) override {
-    info.advertise<LivenessFlow>();
+    info.advertise<LiveFlow>();
   }
 
   void invalidate(IRInfo<Function> &info) override {
-    info.retract<LivenessFlow>();
-    data.blockLiveness.clear();
+    info.retract<LiveFlow>();
+    data.blockLive.clear();
   }
 
 private:
-  LivenessFlow data;
+  LiveFlow data;
   Arch *arch;
   RegTracking *regTrack;
 };
 
-class PrintLivenessFlowPass : public IRPass<Function> {
-  const char *name() { return "PrintLivenessFlowPass"; }
+class PrintLiveFlowPass : public IRPass<Function> {
+  const char *name() { return "PrintLiveFlowPass"; }
 
   void run(Function &func, IRInfo<Function> &info) {
-    auto regLive = info.query<LivenessFlow>();
+    auto regLive = info.query<LiveFlow>();
     auto printer = info.query<PrintIRVisitor>();
     std::cout << "-- LivenessFlow --\n";
     for (auto &block : func) {
-      auto blockLive = regLive.blockLiveness[&block];
+      auto blockLive = regLive.blockLive[&block];
       printer.printNumberedDef(block.getDef());
       std::cout << ":\n";
 
@@ -255,52 +257,49 @@ class LiveIntervalsPass : public IRPass<Function> {
   const char *name() override { return "LiveIntervalsPass"; }
   void run(Function &func, IRInfo<Function> &info) override {
     arch = &info.getArch();
-    data = LiveIntervals();
+    intervals = LiveIntervals();
     regTrack = &info.query<RegTracking>();
-    flow = &info.query<LivenessFlow>();
+    flow = &info.query<LiveFlow>();
     numberInstructions(func);
     buildIntervals(func);
-    info.publish(data);
+    info.publish(intervals);
     info.preserveAll();
   }
 
   void numberInstructions(Function &func) {
     for (auto &block : func) {
-      data.number(&block.getSentryBegin());
+      intervals.number(&block.getSentryBegin());
       for (auto &instr : block) {
-        data.number(&instr);
+        intervals.number(&instr);
       }
-      data.number(&block.getSentryEnd());
+      intervals.number(&block.getSentryEnd());
     }
   }
 
   void buildIntervals(Function &func) {
     for (auto &block : func | std::views::reverse) {
-      auto &blockLive = flow->blockLiveness[&block];
+      auto &blockLive = flow->blockLive[&block];
       auto live = blockLive.liveOut;
-      auto blockIn = data.getNumLiveIn(block);
-      auto blockOut = data.getNumLiveOut(block);
+      auto blockIn = intervals.getNumLiveIn(block);
+      auto blockOut = intervals.getNumLiveOut(block);
       for (auto reg : live) {
-        data.intervals[reg].addRangeCoalesceBegin(blockIn, blockOut);
+        intervals.intervals[reg].addRangeCoalesceBegin(blockIn, blockOut);
       }
       for (auto &instr : block | std::views::reverse) {
         if (instr.isPhi())
           continue;
         for (auto &op : instr) {
-          if (op.isSSARegUse()) {
-            Reg reg = regTrack->getRegForSSADef(op.ssaUse().getDef());
-            useReg(reg, instr, live);
-          } else if (op.isSSARegDef()) {
-            Reg reg = regTrack->getRegForSSADef(op);
+          auto [reg, isDef] = regTrack->getRegForOperand(op);
+          if (!reg)
+            continue;
+          if (isDef) {
+            if (LiveFlowPass::ignoreReg(*arch, reg))
+              continue;
             defReg(reg, instr, live);
-          } else if (op.isRegUse()) {
-            if (LivenessFlowPass::ignoreReg(*arch, op.reg()))
+          } else {
+            if (LiveFlowPass::ignoreReg(*arch, reg))
               continue;
-            useReg(op.reg(), instr, live);
-          } else if (op.isRegDef()) {
-            if (LivenessFlowPass::ignoreReg(*arch, op.reg()))
-              continue;
-            defReg(op.reg(), instr, live);
+            useReg(reg, instr, live);
           }
         }
       }
@@ -308,20 +307,20 @@ class LiveIntervalsPass : public IRPass<Function> {
   }
 
   void useReg(Reg reg, Instr &instr, std::unordered_set<Reg> &live) {
-    auto blockIn = data.getNumLiveIn(instr.getParent());
-    auto instrNum = data.getNumInstr(instr);
+    auto blockIn = intervals.getNumLiveIn(instr.getParent());
+    auto instrNum = intervals.getNumInstr(instr);
     if (live.insert(reg).second) {
-      data.intervals[reg].addRangeCoalesceBegin(blockIn, instrNum);
+      intervals.intervals[reg].addRangeCoalesceBegin(blockIn, instrNum);
     }
   }
 
   void defReg(Reg reg, Instr &instr, std::unordered_set<Reg> &live) {
-    auto instrNum = data.getNumInstr(instr);
+    auto instrNum = intervals.getNumInstr(instr);
     if (live.erase(reg)) {
-      data.intervals[reg].updateFromBegin(instrNum);
+      intervals.intervals[reg].updateFromBegin(instrNum);
     } else {
-      data.intervals[reg].addRangeCoalesceBegin(instrNum,
-                                                {instrNum, LivePos::LATE});
+      intervals.intervals[reg].addRangeCoalesceBegin(instrNum,
+                                                     {instrNum, LivePos::LATE});
     }
   }
 
@@ -333,21 +332,21 @@ class LiveIntervalsPass : public IRPass<Function> {
     info.retract<LiveIntervals>();
   }
 
-  LivenessFlow *flow;
+  LiveFlow *flow;
   RegTracking *regTrack;
   Arch *arch;
-  LiveIntervals data;
+  LiveIntervals intervals;
 };
 
 class PrintLiveIntervalsPass : public IRPass<Function> {
   const char *name() override { return "PrintLiveIntervalsPass"; }
 
-  void run(Function &obj, IRInfo<Function> &info) override {
+  void run(Function &func, IRInfo<Function> &info) override {
     LiveIntervals &live = info.query<LiveIntervals>();
     PrintIRVisitor printer(info.getArchUnchecked());
     printer.setPreInstrCallback(
         [&](Instr &i) { std::cout << live.getNumInstr(i) << ": "; });
-    printer.dispatch(obj);
+    printer.dispatch(func);
     std::cout << "-- LiveIntervals --\n";
     for (auto &[reg, interval] : live.intervals) {
       printer.printReg(reg);
@@ -377,4 +376,170 @@ class PrintLiveIntervalsPass : public IRPass<Function> {
   void printPos(LivePos pos) {
     std::cout << pos.num << LivePos::slotName(pos.slot);
   }
+};
+
+class LiveSet {
+public:
+  LiveSet() {}
+  LiveSet(size_t sz) : bits(sz) {}
+
+  void insert(Reg reg) { bits.set(reg.getIdx()); }
+
+  void erase(Reg reg) { bits.clr(reg.getIdx()); }
+
+  bool contains(Reg reg) { return bits.tst(reg.getIdx()); }
+
+  DynBitSet bits;
+};
+
+class LiveGraph {
+  friend class LiveGraphPass;
+  friend class PrintLiveGraphPass;
+
+public:
+  static const IRInfoID ID;
+
+  struct VLive {
+    VLive(size_t numPhysRegs) : physLive(numPhysRegs) {}
+    LiveSet physLive;
+    std::vector<size_t> adjVLive;
+    bool ignore = false;
+  };
+
+  LiveGraph(size_t numVRegs, size_t numPhysRegs)
+      : numVRegs(numVRegs), numPhysRegs(numPhysRegs), adjVLive(numVRegs) {
+    vLive.reserve(numVRegs);
+    for (size_t i = 0; i < numVRegs; ++i) {
+      vLive.emplace_back(numPhysRegs);
+    }
+  }
+
+  void addEdge(Reg r1, Reg r2) {
+    if (r1.isVReg() && r2.isVReg()) {
+      addVEdge(r1, r2);
+    } else if (r1.isVReg() && r2.isPhysReg()) {
+      addPhysEdge(r1, r2);
+    } else if (r2.isVReg() && r1.isPhysReg()) {
+      addPhysEdge(r2, r1);
+    }
+  }
+
+  void addVEdge(Reg v1, Reg v2) {
+    assert(v1.isVReg() && v2.isVReg());
+    if (adjVLive.tst(v1.getIdx(), v2.getIdx())) {
+      return;
+    }
+    adjVLive.set(v1.getIdx(), v2.getIdx());
+    getVLive(v1).adjVLive.push_back(v2.getIdx());
+    getVLive(v2).adjVLive.push_back(v1.getIdx());
+  }
+
+  void addPhysEdge(Reg v, Reg phys) {
+    assert(v.isVReg() && phys.isPhysReg());
+    getVLive(v).physLive.insert(phys);
+  }
+
+private:
+  size_t numVRegs;
+  size_t numPhysRegs;
+
+  TriBitSet adjVLive;
+  std::vector<VLive> vLive;
+
+  VLive &getVLive(Reg reg) {
+    assert(reg.isVReg());
+    return vLive[reg.getIdx()];
+  }
+};
+
+class LiveGraphPass : public IRPass<Function> {
+  const char *name() override { return "LiveGraphPass"; }
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    arch = &info.getArch();
+    regTrack = &info.query<RegTracking>();
+    flow = &info.query<LiveFlow>();
+    graph = std::make_unique<LiveGraph>(regTrack->getNumVRegs(),
+                                        arch->getArchRegs().size());
+    for (auto &block : func) {
+      buildGraphForBlock(block);
+    }
+    info.publish(*graph);
+    info.preserveAll();
+  }
+
+  void advertise(IRInfo<Function> &info) override {
+    info.advertise<LiveGraph>();
+  }
+
+  void invalidate(IRInfo<Function> &info) override {
+    info.retract<LiveGraph>();
+    graph = nullptr;
+  }
+
+  void buildGraphForBlock(Block &block) {
+    auto &blockLive = flow->blockLive[&block];
+    auto live = blockLive.liveOut;
+    for (auto &instr : block | std::views::reverse) {
+      if (instr.isPhi())
+        continue;
+      for (auto &op : instr) {
+        auto [reg, isDef] = regTrack->getRegForOperand(op);
+        if (!reg)
+          continue;
+        if (isDef) {
+          if (LiveFlowPass::ignoreReg(*arch, reg))
+            continue;
+          // FIXME: should multiple defs always interfere with each other?
+          live.erase(reg);
+          for (auto oReg : live) {
+            graph->addEdge(reg, oReg);
+          }
+        } else {
+          if (LiveFlowPass::ignoreReg(*arch, reg))
+            continue;
+          live.insert(reg);
+        }
+      }
+    }
+  }
+
+private:
+  std::unique_ptr<LiveGraph> graph;
+  LiveFlow *flow;
+  RegTracking *regTrack;
+  Arch *arch;
+};
+
+class PrintLiveGraphPass : public IRPass<Function> {
+  const char *name() override { return "PrintLiveGraphPass"; }
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    LiveGraph &graph = info.query<LiveGraph>();
+    printer = &info.query<PrintIRVisitor>();
+
+    for (size_t i = 0; i < graph.numVRegs; ++i) {
+      std::cout << i << ":\n";
+      printVLive(graph.vLive[i]);
+    }
+
+    info.preserveAll();
+  }
+
+  void printVLive(LiveGraph::VLive v) {
+    std::cout << "  Phys:";
+    v.physLive.bits.for_each([this](auto i) {
+      std::cout << " ";
+      printer->printReg(i);
+    });
+    std::cout << "\n";
+    std::cout << "  Virt:";
+    for (auto i : v.adjVLive) {
+      std::cout << " ";
+      printer->printReg(Reg::vReg(i));
+    }
+    std::cout << "\n";
+  }
+
+  PrintIRVisitor *printer;
 };

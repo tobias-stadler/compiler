@@ -19,10 +19,9 @@ public:
 
   Reg trackSSADef(Operand &def) {
     assert(def.isSSARegDef());
-    auto [it, succ] = ssaDefToReg.try_emplace(&def, nextVReg);
+    auto [it, succ] = ssaDefToReg.try_emplace(&def, Reg::vReg(vRegs.size()));
     if (succ) {
-      auto &reg = vRegs.emplace_back(def);
-      ++nextVReg;
+      vRegs.emplace_back(def);
     }
     return it->second;
   }
@@ -31,20 +30,20 @@ public:
     assert(def.isSSARegDef());
     auto it = ssaDefToReg.find(&def);
     if (it == ssaDefToReg.end()) {
-      return 0;
+      return {};
     }
     return it->second;
   }
 
-  Reg getRegForOperand(Operand &op) {
+  std::pair<Reg, bool> getRegForOperand(Operand &op) {
     if (op.isReg()) {
-      return op.reg();
+      return {op.reg(), op.isRegDef()};
     }
     if (op.isSSARegDef()) {
-      return getRegForSSADef(op);
+      return {getRegForSSADef(op), true};
     }
     if (op.isSSARegUse()) {
-      return getRegForSSADef(op.ssaUse().getDef());
+      return {getRegForSSADef(op.ssaUse().getDef()), false};
     }
     return {};
   }
@@ -68,20 +67,17 @@ public:
 
   size_t getNumVRegs() { return vRegs.size(); }
 
-  Reg getFirstVReg() { return firstVReg; }
-
   Reg createVReg(SSAType &type) {
-    auto &reg = vRegs.emplace_back(type);
-    return nextVReg++;
+    auto reg = Reg::vReg(vRegs.size());
+    vRegs.emplace_back(type);
+    return reg;
   }
 
-  bool isVReg(Reg reg) {
-    return reg >= firstVReg && (reg - firstVReg) < vRegs.size();
-  }
+  bool isVReg(Reg reg) { return reg.isVReg() && reg.getIdx() < vRegs.size(); }
 
-  iterator begin() { return firstVReg; }
+  iterator begin() { return Reg::vReg(0); }
 
-  iterator end() { return nextVReg; }
+  iterator end() { return Reg::vReg(vRegs.size()); }
 
 private:
   struct VRegInfo {
@@ -95,13 +91,11 @@ private:
 
   VRegInfo &getVRegInfo(Reg reg) {
     assert(isVReg(reg));
-    return vRegs[reg - firstVReg];
+    return vRegs[reg.getIdx()];
   }
 
   std::unordered_map<Operand *, Reg> ssaDefToReg;
   std::vector<VRegInfo> vRegs;
-  static const Reg::num_t firstVReg = 1000;
-  Reg::num_t nextVReg = firstVReg;
 };
 
 class RegTrackingPass : public IRPass<Function>,
@@ -140,7 +134,7 @@ class PrintRegTrackingPass : public IRPass<Function> {
     std::cout << "-- RegTracking --\n";
     for (size_t i = 0; i < regTrack.vRegs.size(); ++i) {
       auto &reg = regTrack.vRegs[i];
-      std::cout << (i + regTrack.firstVReg) << ": ";
+      std::cout << i << ": ";
       if (reg.ssaDef) {
         printer.printNumberedDef(*reg.ssaDef);
       } else if (reg.ssaType) {

@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 class RecordSpace;
@@ -20,6 +21,22 @@ public:
   RecordSpace *parent = nullptr;
 };
 
+using Tokens = std::vector<Token>;
+template <typename T> class TokensOrParsed {
+public:
+  TokensOrParsed() : data(Tokens{}) {}
+  TokensOrParsed(T &&t) : data(std::move(t)) {}
+  TokensOrParsed(const T &t) : data(t) {}
+
+  Tokens &tokens() { return get<Tokens>(data); }
+  T &parsed() { return get<T>(data); }
+
+  bool isParsed() { return std::holds_alternative<T>(data); }
+
+private:
+  std::variant<Tokens, T> data;
+};
+
 class TokenRecord : public Record {
 public:
   TokenRecord();
@@ -33,7 +50,8 @@ public:
     return toks.back().str;
   }
 
-  std::vector<Token> toks;
+  Tokens toks;
+  TokenSource* tokSrc = nullptr;
   std::string_view realType;
 };
 
@@ -137,6 +155,7 @@ public:
       : instanceRec(instanceRec), tokRec(tokRec) {}
 
   Token fetchToken() override;
+  void dump(Token tok) override;
 };
 
 class IncludeRecord : public RecordSpace {
@@ -152,6 +171,7 @@ public:
   std::vector<RecordSpace *> usedRecs;
   std::string content;
   std::string_view includeDir;
+  std::unique_ptr<StringTokenSource> tokSrc;
 };
 
 std::string loadFile(std::string_view fileName);

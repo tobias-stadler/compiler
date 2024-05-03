@@ -15,7 +15,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%arith,i32) %lhs #imm;
+    riscv::OUT def(%arith,i32) %lhs imm32(#imm$.mInt().toInt32()$);
   }
 }
 ir_pat {
@@ -27,7 +27,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%arith,i32) %lhs #imm;
+    riscv::OUT def(%arith,i32) %lhs imm32(#imm$.mInt().toInt32()$);
   }
 }
 }
@@ -53,7 +53,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%arith,i32) %lhs #imm;
+    riscv::OUT def(%arith,i32) %lhs imm32(#imm$.mInt().toInt32()$);
   }
 }
 }
@@ -87,12 +87,12 @@ ir_pat {
     CMP def(%cmp,i32) IN;
   }
   if {
-    #imm $.imm32() != 0$
+    $!$ #imm $.mInt().isZero()$
     $&&$
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%cmp,i32) %lhs #imm;
+    riscv::OUT def(%cmp,i32) %lhs imm32(#imm$.mInt().toInt32()$);
   }
 }
 }
@@ -114,12 +114,12 @@ ir_pat {
     CMP def(%cmp,i32) IN;
   }
   if {
-    #imm $.imm32() != 0$
+    $!$ #imm $.mInt().isZero()$
     $&&$
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%set,i32) %lhs #imm;
+    riscv::OUT def(%set,i32) %lhs imm32(#imm$.mInt().toInt32()$);
     riscv::XORI def(%cmp,i32) %set imm32(1);
   }
 }
@@ -166,7 +166,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%dst,i32) %base #imm;
+    riscv::OUT def(%dst,i32) %base imm32(#imm$.mInt().toInt32()$);
   }
 }
 ir_pat {
@@ -182,7 +182,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT def(%dst,i32) %base #imm;
+    riscv::OUT def(%dst,i32) %base imm32(#imm$.mInt().toInt32()$);
   }
 }
 ir_pat {
@@ -198,7 +198,7 @@ ir_pat {
     $isLegalImmNegated($ #imm $)$
   }
   emit {
-    riscv::OUT def(%dst,i32) %base imm32($-$ #imm $.imm32()$);
+      riscv::OUT def(%dst,i32) %base imm32($-$#imm$.mInt().toInt32()$);
   }
 }
 }
@@ -227,7 +227,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT %src %base #imm;
+    riscv::OUT %src %base imm32(#imm$.mInt().toInt32()$);
   }
 }
 ir_pat {
@@ -243,7 +243,7 @@ ir_pat {
     $isLegalImm($ #imm $)$
   }
   emit {
-    riscv::OUT %src %base #imm;
+    riscv::OUT %src %base imm32(#imm$.mInt().toInt32()$);
   }
 }
 ir_pat {
@@ -259,7 +259,7 @@ ir_pat {
     $isLegalImmNegated($ #imm $)$
   }
   emit {
-    riscv::OUT %src %base imm32($-$ #imm $.imm32()$);
+    riscv::OUT %src %base imm32($-$#imm$.mInt().toInt32()$);
   }
 }
 }
@@ -342,7 +342,7 @@ let isel = IRPatExecutor {
 
 ir_pat {
   match {
-    CONST_INT def(%c,i32) imm32(0);
+    CONST_INT def(%c,i32) MInt(32,0);
   }
   emit {
     COPY def(%c,i32) riscv::X0;
@@ -353,7 +353,7 @@ ir_pat {
     CONST_INT def(%c,i32) #imm;
   }
   emit {
-    riscv::PSEUDO_LI def(%c,i32) #imm;
+    riscv::PSEUDO_LI def(%c,i32) imm32(#imm$.mInt().toInt32()$);
   }
 }
 
@@ -413,7 +413,7 @@ ir_pat {
 
 ir_pat {
   match {
-    CONST_INT def(%c,i32) imm32(0);
+    CONST_INT def(%c,i32) MInt(32,0);
     CMP def(%cmp,i32) eq %lhs %c;
   }
   emit {
@@ -429,7 +429,7 @@ ir_pat {
     $isLegalImmNegated($ #imm $)$
   }
   emit {
-    riscv::ADDI def(%sub,i32) %lhs imm32($-$#imm$.imm32()$);
+    riscv::ADDI def(%sub,i32) %lhs imm32($-$#imm$.mInt().toInt32()$);
     riscv::SLTIU def(%cmp,i32) %sub imm32(1);
   }
 }
@@ -445,7 +445,7 @@ ir_pat {
 
 ir_pat {
   match {
-    CONST_INT def(%c,i32) imm32(0);
+    CONST_INT def(%c,i32) MInt(32,0);
     CMP def(%cmp,i32) ne %lhs %c;
   }
   emit {
@@ -461,7 +461,7 @@ ir_pat {
     $isLegalImmNegated($ #imm $)$
   }
   emit {
-    riscv::ADDI def(%sub,i32) %lhs imm32($-$#imm$.imm32()$);
+    riscv::ADDI def(%sub,i32) %lhs imm32($-$#imm$.mInt().toInt32()$);
     riscv::SLTU def(%cmp,i32) riscv::X0 %lhs;
   }
 }
@@ -509,7 +509,7 @@ ir_pat {
     $isLegalImmNegated($ #imm $)$
   }
   emit {
-    riscv::ADDI def(%arith,i32) %lhs imm32($-$#imm$.imm32()$);
+    riscv::ADDI def(%arith,i32) %lhs imm32($-$#imm$.mInt().toInt32()$);
   }
 }
 !ArithImmPat {

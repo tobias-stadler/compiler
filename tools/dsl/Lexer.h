@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -66,21 +67,27 @@ public:
 
 class TokenSource {
 public:
+  virtual ~TokenSource() {}
   virtual Token fetchToken() = 0;
+  virtual void dump(Token tok) {}
 };
 
 class StringTokenSource : public TokenSource {
 public:
   std::string_view str;
   std::string_view::iterator pos;
+  std::vector<const char *> newlines;
 
   StringTokenSource(std::string_view str) : str(str), pos(str.begin()) {}
 
   Token fetchToken() override;
+  void dump(Token tok) override;
 
   Token::Kind getSingleCharKind();
 
   bool eatWhitespace();
+
+  std::optional<size_t> getLineNum(std::string_view str);
 };
 
 class Lexer {
@@ -89,6 +96,9 @@ public:
   Token tok;
 
   Lexer(TokenSource &tokSrc) : tokSrc(tokSrc) { fetchToken(); }
+
+  [[noreturn]] void error(std::string_view err, Token tok);
+  [[noreturn]] void error(std::string_view err) { error(err, tok); }
 
   void fetchToken() { tok = tokSrc.fetchToken(); }
 

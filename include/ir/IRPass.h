@@ -55,8 +55,8 @@ public:
     preserve<T>();
   }
 
-  template <typename T> T &query() {
-    auto it = publisher.find(&T::ID);
+  template <typename T> T &query(bool forceRun = false) {
+    auto it = forceRun ? publisher.end() : publisher.find(&T::ID);
     void *dataPtr = nullptr;
     if (it == publisher.end()) {
       auto &pass = getAdvertisingPass(&T::ID);

@@ -7,3 +7,7 @@
 #define UNREACHABLE(msg)                                                       \
   assert(false && msg);                                                        \
   unreachable();
+
+template<typename...>
+inline constexpr bool dependent_false_v = false;
+

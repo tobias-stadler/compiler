@@ -4,12 +4,6 @@
 
 namespace {
 
-bool isConstant(Operand &op, int32_t val) {
-  Instr &instr = op.getParent();
-  return instr.getKind() == Instr::CONST_INT &&
-         instr.getOperand(1).imm32() == val;
-}
-
 #include "riscv/InstrSelector.dsl.preISelExpansion.h"
 
 IntSSAType &XTy = IntSSAType::get(riscv::XLEN);

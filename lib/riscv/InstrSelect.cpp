@@ -9,17 +9,12 @@ unsigned selectExtShiftBits(Operand &op) {
   return riscv::XLEN - static_cast<IntSSAType &>(op.ssaDefType()).getBits();
 }
 
-bool isLegalImm(Operand &op) {
-  int32_t imm = op.imm32();
-  return TCInt::canTrunc<12>(imm);
-}
-bool isLegalImmNegated(Operand &op) {
-  int32_t imm = op.imm32();
-  return imm > INT32_MIN && TCInt::canTrunc<12>(-imm);
-}
-bool isLegalMemAccess(Operand& op, size_t alignExp) {
-  MemoryAccessDef& mem = as<MemoryAccessDef>(op.ssaDefOther());
-  return mem.getSize() == (1UL << alignExp) && mem.getAlign().getExp() == alignExp;
+bool isLegalImm(Operand &op) { return op.mInt().canSTrunc(12); }
+bool isLegalImmNegated(Operand &op) { return (-op.mInt()).canSTrunc(12); }
+bool isLegalMemAccess(Operand &op, size_t alignExp) {
+  MemoryAccessDef &mem = as<MemoryAccessDef>(op.ssaDefOther());
+  return mem.getSize() == (1UL << alignExp) &&
+         mem.getAlign().getExp() == alignExp;
 }
 
 #include "riscv/InstrSelector.dsl.isel.h"
