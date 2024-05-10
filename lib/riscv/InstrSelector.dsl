@@ -132,7 +132,7 @@ ir_pat {
     IN def(%dst,i32) %tr;
   }
   if {
-    %src $.ssaDefType() == IntSSAType::get(32)$
+    %src $.ssaDef().type() == IntSSAType::get(32)$
   }
   emit {
     riscv::SLLI def(%sl,i32) %src imm32($selectExtShiftBits($ %tr $)$);
@@ -272,7 +272,7 @@ ir_pat {
     ART2 def(%a2,_) %a1;
   }
   emit {
-    OUT def(%a2,%a2$.ssaDefType()$) %src;
+    OUT def(%a2,%a2$.ssaDef().type()$) %src;
   }
 }
 }
@@ -312,7 +312,7 @@ ir_pat {
     EXT_A def(%a2,_) %a1;
   }
   if {
-    %src $.ssaDefType() == $ %a2 $.ssaDefType()$
+    %src $.ssaDef().type() == $ %a2 $.ssaDef().type()$
   }
   apply {
     %a2 $.ssaDef().replaceAllUses($ %src $)$
@@ -362,7 +362,7 @@ ir_pat {
     REF_EXTERN def(%gaddr,i32) %g;
   }
   if {
-    %g $.ssaDefOther().isGlobal()$
+    %g $.ssaDefExtern().isGlobal()$
   }
   emit {
     riscv::PSEUDO_LA def(%gaddr,i32) %g;

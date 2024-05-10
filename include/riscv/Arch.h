@@ -2,13 +2,14 @@
 
 #include "ir/Alignment.h"
 #include "ir/Arch.h"
+#include "ir/ArchInstrBuilder.h"
 #include "ir/FrameLayout.h"
 #include "ir/IR.h"
 #include "ir/IRPass.h"
 #include "ir/IRPatExecutor.h"
 #include "ir/IRVisitor.h"
-#include "ir/InstrBuilder.h"
 #include "ir/Operand.h"
+#include "ir/SSAInstrBuilder.h"
 #include "support/Ranges.h"
 #include "support/Utility.h"
 #include <array>
@@ -22,6 +23,32 @@ constexpr unsigned XALIGNEXP = 2;
 
 #include "riscv/Arch.dsl.riscv.h"
 
+class ArchInstrBuilder : public ::ArchInstrBuilder {
+  void frameLoadReg(InstrBuilder &b, Reg reg,
+                    FrameDef &frameDef) const override {
+    // FIXME: proper regclass handling
+    assert(frameDef.getSize() == 4);
+    Reg addrReg = b.getFunction().getRegInfo().cloneVReg(reg);
+    b.emitExternRef(addrReg, frameDef);
+    Instr &i = b.emitInstr(LW, 3);
+    i.emplaceOperand<Operand::REG_DEF>(reg);
+    i.emplaceOperand<Operand::REG_USE>(addrReg);
+    i.emplaceOperand<Operand::IMM32>(0);
+  }
+
+  void frameStoreReg(InstrBuilder &b, Reg reg,
+                     FrameDef &frameDef) const override {
+    // FIXME: proper regclass handling
+    assert(frameDef.getSize() == 4);
+    Reg addrReg = b.getFunction().getRegInfo().cloneVReg(reg);
+    b.emitExternRef(addrReg, frameDef);
+    Instr &i = b.emitInstr(SW, 3);
+    i.emplaceOperand<Operand::REG_USE>(reg);
+    i.emplaceOperand<Operand::REG_USE>(addrReg);
+    i.emplaceOperand<Operand::IMM32>(0);
+  }
+};
+
 class Arch : public ::Arch {
 public:
   std::span<const ArchReg> getArchRegs() override { return archRegs; };
@@ -34,6 +61,12 @@ public:
   const ArchRegClass *getArchRegClass(unsigned kind) override {
     return riscv::getArchRegClass(kind);
   }
+
+  const ArchInstrBuilder &getArchInstrBuilder() override {
+    return archInstrBuilder;
+  }
+
+  ArchInstrBuilder archInstrBuilder;
 };
 
 class ABILoweringPass : public IRPass<Function> {
@@ -53,7 +86,7 @@ class ABILoweringPass : public IRPass<Function> {
     auto &abiTy = IntSSAType::get(32);
 
     auto &entryBB = func.getFirst();
-    InstrBuilder ir(entryBB.getFirstSentry());
+    SSAInstrBuilder ir(entryBB.getFirstSentry());
     size_t paramNum = 0;
     for (auto it = entryBB.begin(), itEnd = entryBB.end(); it != itEnd;) {
       auto &instr = *it;
@@ -64,7 +97,7 @@ class ABILoweringPass : public IRPass<Function> {
       worklist.push_back(&instr);
       if (paramNum < inRegs.size()) {
         ir.emitCopy(abiTy, inRegs[paramNum]);
-        if (instr.getDef().ssaDefType() != abiTy) {
+        if (instr.getDef().ssaDef().type() != abiTy) {
           assert(false && "Unsupported parameter type");
         }
         instr.getDef().ssaDef().replaceAllUses(ir.getDef());
@@ -82,7 +115,7 @@ class ABILoweringPass : public IRPass<Function> {
       for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
         auto &instr = *it;
         ++it;
-        InstrBuilder ir(instr);
+        SSAInstrBuilder ir(instr);
         if (instr.getKind() == Instr::RET) {
           size_t paramNum = 0;
           Instr *i = func.createInstr(JALR, 3 + instr.getNumOperands());
@@ -90,7 +123,7 @@ class ABILoweringPass : public IRPass<Function> {
           i->emplaceOperand<Operand::REG_USE>(ALIAS_ra);
           i->emplaceOperand<Operand::IMM32>(0);
           for (auto &op : instr) {
-            assert(op.ssaUse().getDef().ssaDefType() == abiTy);
+            assert(op.ssaUse().getDef().ssaDef().type() == abiTy);
             assert(paramNum < outRegs.size());
             ir.emitCopy(outRegs[paramNum], op.ssaUse().getDef());
             i->emplaceOperand<Operand::REG_USE>(outRegs[paramNum]);
@@ -105,7 +138,7 @@ class ABILoweringPass : public IRPass<Function> {
           for (auto it = instr.other_begin() + 1, itEnd = instr.other_end();
                it != itEnd; ++it) {
             auto &op = *it;
-            assert(op.ssaUse().getDef().ssaDefType() == abiTy);
+            assert(op.ssaUse().getDef().ssaDef().type() == abiTy);
             assert(paramNum < inRegs.size());
             ir.emitCopy(inRegs[paramNum], op.ssaUse().getDef());
             ++paramNum;
@@ -117,7 +150,7 @@ class ABILoweringPass : public IRPass<Function> {
           for (auto it = instr.def_begin(), itEnd = instr.def_end();
                it != itEnd; ++it) {
             auto &op = *it;
-            assert(op.ssaDefType() == abiTy);
+            assert(op.ssaDef().type() == abiTy);
             assert(paramNum < outRegs.size());
             ir.emitCopy(abiTy, outRegs[paramNum]);
             op.ssaDef().replaceAllUses(ir.getDef());
@@ -246,7 +279,7 @@ class FrameLoweringPass : public IRPass<Function> {
 
   void materializeFrameRefs(FrameLayout &frameLayout) {
     for (auto &frameEntry : frameLayout.entryRange()) {
-      for (auto &use : make_earlyincr_range(frameEntry.getDef().ssaDef())) {
+      for (auto &use : make_earlyincr_range(frameEntry.operand().ssaDef())) {
         Instr &instr = use.getParent();
         size_t frameOffset = frameOffsets[frameEntry.getId()];
         switch (instr.getKind()) {
@@ -364,14 +397,14 @@ public:
     case Operand::TYPE:
     case Operand::BLOCK:
     case Operand::BRCOND:
-    case Operand::CHAIN:
+    case Operand::OP_CHAIN:
     case Operand::MINT:
       assert(false && "Illegal operand");
       break;
     case Operand::SSA_USE: {
       Operand &def = op.ssaUse().getDef();
       if (def.getKind() == Operand::SSA_DEF_EXTERN) {
-        printExternSSADef(def.ssaDefOther());
+        printExternSSADef(def.ssaDefExtern());
         break;
       }
       assert(false && "Illegal operand");

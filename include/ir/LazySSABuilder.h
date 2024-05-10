@@ -1,10 +1,8 @@
 #pragma once
 
 #include "ir/IR.h"
-#include "ir/InstrBuilder.h"
-#include <algorithm>
+#include "ir/SSAInstrBuilder.h"
 #include <cassert>
-#include <memory>
 #include <unordered_map>
 
 // Construct SSA using lazy reaching definitions analysis
@@ -62,11 +60,11 @@ public:
     auto &renum = SSARenumberTable::getTable(block);
     Operand *def = renum.get(id);
     if (def) {
-      assert(def->ssaDefType() == type);
+      assert(def->ssaDef().type() == type);
       return def;
     }
     if (!renum.sealed) {
-      auto phi = InstrBuilder(block.getFirstSentry()).emitPhi(type);
+      auto phi = SSAInstrBuilder(block.getFirstSentry()).emitPhi(type);
       def = &phi->getDef();
       renum.set(id, def);
       renum.incompletePhis.emplace_back(phi.get(), id);
@@ -77,10 +75,10 @@ public:
       return nullptr;
     }
     if (numPreds == 1) {
-      def = load(id, type, block.getDef().ssaDef().begin()->getParentBlock());
+      def = load(id, type, block.operand().ssaDef().begin()->getParentBlock());
       if (!def)
         return nullptr;
-      assert(def->ssaDefType() == type);
+      assert(def->ssaDef().type() == type);
       renum.set(id, def);
       return def;
     }
@@ -97,7 +95,7 @@ public:
       return nullptr;
     }
     renum.marked = true;
-    auto phi = InstrBuilder(block.getFirstSentry()).emitPhi(type);
+    auto phi = SSAInstrBuilder(block.getFirstSentry()).emitPhi(type);
     def = &phi->getDef();
     renum.set(id, def);
     populatePhi(phi, id);
@@ -154,12 +152,15 @@ private:
   }
 
   static void populatePhi(PhiInstrPtr phi, SymbolId id) {
+    SSAType &type = phi->getDef().ssaDef().type();
     phi.setupPredecessors(phi->getParent().getNumPredecessors());
     unsigned predNum = 0;
-    for (auto &use : phi->getParent().getDef().ssaDef()) {
+    for (auto &use : phi->getParent().operand().ssaDef()) {
       Block &predBlock = use.getParentBlock();
-      Operand *predDef = load(id, phi->getDef().ssaDefType(), predBlock);
-      assert(predDef);
+      Operand *predDef = load(id, type, predBlock);
+      if (!predDef) {
+        predDef = &SSAInstrBuilder(predBlock.getLast()).emitUndefined(type);
+      }
       phi.setPredecessor(predNum, *predDef, predBlock);
       ++predNum;
     }

@@ -28,7 +28,6 @@ ir/IR.cpp
 ir/SSAType.cpp
 ir/IRPrinter.cpp
 ir/RegLiveness.cpp
-ir/RegTracking.cpp
 ir/RegAlloc.cpp
 ir/DominatorTree.cpp
 riscv/PreISelExpansion.cpp

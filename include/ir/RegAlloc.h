@@ -1,18 +1,38 @@
 #pragma once
 
+#include "ir/ArchInstrBuilder.h"
 #include "ir/IR.h"
 #include "ir/IRPass.h"
 #include "ir/RegLiveness.h"
+#include "support/Ranges.h"
 #include <algorithm>
+#include <cassert>
 #include <set>
 
 class RegAlloc {
 public:
   static const IRInfoID ID;
-  std::unordered_map<Reg, Reg> vRegToPhys;
+
+  struct Assignment {
+    enum Kind {
+      NONE,
+      PHYS_REG,
+      NO_REG,
+    };
+
+    Kind kind = NONE;
+    Reg reg;
+    size_t spillCost;
+  };
+
+  RegAlloc() {}
+  RegAlloc(size_t numVRegs) : vRegs(numVRegs) {}
+
+  VRegMap<Assignment> vRegs;
 };
 
-class RegAllocPass : public IRPass<Function> {
+/*
+class LinearRegAllocPass : public IRPass<Function> {
 
   const char *name() override { return "RegAllocPass"; }
 
@@ -75,45 +95,179 @@ class RegAllocPass : public IRPass<Function> {
 private:
   RegAlloc alloc;
 };
+*/
 
 class RegRewritePass : public IRPass<Function> {
   const char *name() override { return "RegRewritePass"; }
 
   void run(Function &func, IRInfo<Function> &info) override {
-    RegTracking &regTrack = info.query<RegTracking>();
     RegAlloc &regAlloc = info.query<RegAlloc>();
 
-    // Rewrite real vRegs
     for (auto &block : func) {
       for (auto &instr : block) {
         for (auto &op : instr) {
-          if (!op.isReg())
+          if (!op.isReg() || !op.reg().isVReg())
             continue;
-
-          auto it = regAlloc.vRegToPhys.find(op.reg());
-          if (it == regAlloc.vRegToPhys.end()) {
-            continue;
-          }
-          if (op.isRegDef()) {
-            op.emplaceRaw<Operand::REG_DEF>(it->second);
-          } else {
-            op.emplaceRaw<Operand::REG_USE>(it->second);
-          }
+          auto &regAssign = regAlloc.vRegs[op.reg()];
+          assert(regAssign.kind == RegAlloc::Assignment::PHYS_REG);
+          op.regDefUse().replace(regAssign.reg);
         }
       }
     }
+  }
+};
 
-    // Rewrite SSA Defs
-    for (Reg currReg = regTrack.begin(); currReg != regTrack.end();
-         currReg = currReg + 1) {
-      auto *op = regTrack.getSSADef(currReg);
-      auto it = regAlloc.vRegToPhys.find(currReg);
-      if (!op)
+class ColoringRegAllocPass : public IRPass<Function> {
+
+  const char *name() override { return "ColoringRegAllocPass"; }
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    this->func = &func;
+    printer = &info.query<PrintIRVisitor>();
+    arch = &info.getArch();
+    regInfo = &func.getRegInfo();
+
+    const ArchRegClass &regClass = *arch->getArchRegClass(1);
+
+    bool failed;
+    do {
+      graph = &info.query<LiveGraph>();
+      alloc = RegAlloc(graph->getNumVRegs());
+      virtSet = VLiveSet(graph->getNumVRegs());
+      physSet = PhysLiveSet(graph->getNumPhysRegs());
+      graph = &info.query<LiveGraph>();
+      simplify(regClass.regs.size());
+      selectAll();
+      spillAll();
+      failed = false;
+      for (auto [reg, regAssign] : alloc.vRegs) {
+        if (regAssign.kind != RegAlloc::Assignment::PHYS_REG) {
+          failed = true;
+          break;
+        }
+      }
+      info.invalidate<LiveFlow>();
+      info.invalidate<LiveGraph>();
+    } while (failed);
+
+    info.publish(alloc);
+  }
+
+  void simplify(size_t k) {
+    std::cout << "simplify\n";
+    eliminationOrder.clear();
+    graph->resetIgnore();
+    virtSet.clear();
+    for (auto [reg, vLive] : graph->vRegs) {
+      if (vLive.degree < k) {
+        eliminate(reg);
+      } else {
+        virtSet.insert(reg);
+      }
+    }
+    calcSpillCost();
+    while (!virtSet.empty()) {
+      Reg spillReg = Reg();
+      for (auto reg : virtSet) {
+        if (graph->vRegs[reg].degree < k) {
+          eliminate(reg);
+          virtSet.erase(reg);
+          spillReg = Reg();
+          break;
+        }
+        if (!spillReg ||
+            alloc.vRegs[reg].spillCost < alloc.vRegs[spillReg].spillCost) {
+          spillReg = reg;
+        }
+      }
+      if (!spillReg)
         continue;
-      if (it == regAlloc.vRegToPhys.end())
-        continue;
-      regTrack.lowerSSADef(currReg);
-      op->ssaDefReplace(it->second);
+      eliminate(spillReg);
+      virtSet.erase(spillReg);
+      std::cout << "  might spill " << spillReg.getIdx() << " with cost "
+                << alloc.vRegs[spillReg].spillCost << "\n";
     }
   }
+
+  void eliminate(Reg reg) {
+    eliminationOrder.push_back(reg);
+    graph->ignore(reg);
+  }
+
+  void calcSpillCost() {
+    for (auto reg : virtSet) {
+      alloc.vRegs[reg].spillCost = regInfo->defUseRoot(reg).count();
+    }
+  }
+
+  void selectAll() {
+    for (auto reg : eliminationOrder | std::views::reverse) {
+      select(reg);
+    }
+  }
+
+  void spillAll() {
+    for (auto [reg, regAssign] : alloc.vRegs) {
+      if (regAssign.kind != RegAlloc::Assignment::NO_REG)
+        continue;
+      spillGlobal(reg);
+    }
+  }
+
+  void select(Reg reg) {
+    std::cout << "select " << reg.getIdx() << ": ";
+    const ArchRegClass &regClass = *arch->getArchRegClass(1);
+    physSet.clear();
+
+    auto &regLive = graph->vRegs[reg];
+    auto &regAssign = alloc.vRegs[reg];
+    physSet.insert(regLive.phys);
+    for (auto oReg : regLive.virt) {
+      auto &oRegAssign = alloc.vRegs[oReg];
+      if (oRegAssign.kind != RegAlloc::Assignment::PHYS_REG)
+        continue;
+      physSet.insert(oRegAssign.reg);
+    }
+    for (auto *archReg : regClass.regs) {
+      if (!physSet.contains(archReg->reg)) {
+        std::cout << "assign " << archReg->name << "\n";
+        regAssign.kind = RegAlloc::Assignment::PHYS_REG;
+        regAssign.reg = archReg->reg;
+        return;
+      }
+    }
+    std::cout << "no phys reg available\n";
+    regAssign.kind = RegAlloc::Assignment::NO_REG;
+  }
+
+  void spillGlobal(Reg reg) {
+    std::cout << "global spill " << reg.getIdx() << "\n";
+    auto &archIB = arch->getArchInstrBuilder();
+    // FIXME: proper size calculation
+    auto &frameDef = func->getFrameLayout().createFrameEntry(4, Alignment(2));
+    for (auto &op : make_earlyincr_range(regInfo->defUseRoot(reg))) {
+      Reg newReg = regInfo->cloneVReg(reg);
+      op.regDefUse().replace(newReg);
+      if (op.isRegDef()) {
+        InstrBuilder IB(op.getParent().getNextNode());
+        archIB.frameStoreReg(IB, newReg, frameDef);
+      } else {
+        InstrBuilder IB(op.getParent());
+        archIB.frameLoadReg(IB, newReg, frameDef);
+      }
+    }
+  }
+
+  void invalidate(IRInfo<Function> &info) override { info.retract<RegAlloc>(); }
+
+private:
+  RegAlloc alloc;
+  PhysLiveSet physSet;
+  VLiveSet virtSet;
+  std::vector<Reg> eliminationOrder;
+  Function *func;
+  RegInfo *regInfo;
+  Arch *arch;
+  LiveGraph *graph;
+  PrintIRVisitor *printer;
 };

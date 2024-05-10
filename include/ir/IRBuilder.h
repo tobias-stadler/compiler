@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ir/IR.h"
-#include "ir/InstrBuilder.h"
+#include "ir/SSAInstrBuilder.h"
 #include <cassert>
 
 class IRBuilder {
@@ -64,12 +64,12 @@ public:
 
   std::unique_ptr<Program> endProgram() { return std::move(program); }
 
-  InstrBuilder &operator*() { return instr; }
-  InstrBuilder *operator->() { return &instr; }
+  SSAInstrBuilder &operator*() { return instr; }
+  SSAInstrBuilder *operator->() { return &instr; }
 
 private:
   std::unique_ptr<Program> program;
   Function *currFunc;
   Block *currBlock;
-  InstrBuilder instr;
+  SSAInstrBuilder instr;
 };

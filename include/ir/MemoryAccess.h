@@ -6,11 +6,11 @@
 class MemoryAccessDef : public ExternSSADef {
 public:
   static bool is_impl(const ExternSSADef &o) {
-    return o.getKind() == LOCAL_MEMORY_ACCESS;
+    return o.getKind() == FUNC_MEMORY_ACCESS;
   }
 
   MemoryAccessDef(size_t size, Alignment align)
-      : ExternSSADef(LOCAL_MEMORY_ACCESS), size(size), align(align) {}
+      : ExternSSADef(FUNC_MEMORY_ACCESS), size(size), align(align) {}
 
   size_t getSize() { return size; }
 

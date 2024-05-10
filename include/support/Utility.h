@@ -8,6 +8,15 @@
   assert(false && msg);                                                        \
   unreachable();
 
-template<typename...>
-inline constexpr bool dependent_false_v = false;
+template <typename...> inline constexpr bool dependent_false_v = false;
 
+template <typename It> class Range {
+public:
+  Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
+
+  It begin() const { return beginIt; }
+  It end() const { return endIt; }
+
+private:
+  It beginIt, endIt;
+};

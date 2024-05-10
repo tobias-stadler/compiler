@@ -1,8 +1,9 @@
 #pragma once
 
 #include "ir/IRPass.h"
-#include "ir/InstrBuilder.h"
-#include "ir/RegTracking.h"
+#include "ir/SSAInstrBuilder.h"
+
+#include <ranges>
 
 class PhiIsolationPass : public IRPass<Function> {
   const char *name() override { return "PhiIsolationPass"; }
@@ -16,14 +17,14 @@ class PhiIsolationPass : public IRPass<Function> {
         auto phi = PhiInstrPtr(&instr);
         for (unsigned i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
           auto &pred = phi.getPredecessorBlock(i);
-          auto builder = InstrBuilder(pred.getLast());
+          auto builder = SSAInstrBuilder(pred.getLast());
           builder.emitCopy(phi.getPredecessorDef(i));
           phi.setPredecessor(i, builder.getDef(), pred);
         }
-        auto builder = InstrBuilder(block.getFirstNonPhiSentry());
+        auto builder = SSAInstrBuilder(block.getFirstNonPhiSentry());
         auto &copyInstr = builder.emitCopy(phi->getDef());
         phi->getDef().ssaDef().replaceAllUses(copyInstr.getDef());
-        copyInstr.getOperand(1).ssaUseReplace(phi->getDef());
+        copyInstr.getOperand(1).ssaUse().replace(phi->getDef());
       }
     }
   }
@@ -33,8 +34,7 @@ class PhiDestructionPass : public IRPass<Function> {
   const char *name() override { return "PhiDestructionPass"; }
 
   void run(Function &func, IRInfo<Function> &info) override {
-    auto &regTrack = info.query<RegTracking>();
-
+    RegInfo &regInfo = func.getRegInfo();
     for (auto &block : func) {
       for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
         auto &instr = *it;
@@ -42,19 +42,36 @@ class PhiDestructionPass : public IRPass<Function> {
         if (!instr.isPhi()) {
           break;
         }
-        Reg reg = regTrack.getRegForSSADef(instr.getDef());
-        regTrack.lowerSSADef(reg);
         auto phi = PhiInstrPtr(&instr);
+        Reg reg = regInfo.createVReg(instr.getDef().ssaDef().type());
         for (unsigned i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
           auto &def = phi.getPredecessorDef(i);
-          regTrack.lowerSSADef(regTrack.getRegForSSADef(def));
-          def.ssaDefReplace(reg);
+          def.ssaDef().replace(reg);
         }
-        instr.getDef().ssaDefReplace(reg);
+        instr.getDef().ssaDef().replace(reg);
         instr.deleteThis();
       }
     }
+  }
+};
 
-    info.preserve<RegTracking>();
+class SSADestructionPass : public IRPass<Function> {
+  const char *name() override { return "SSADestructionPass"; }
+
+  void run(Function &func, IRInfo<Function> &info) override {
+    RegInfo &regInfo = func.getRegInfo();
+    for (auto &block : func) {
+      for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
+        auto &instr = *it;
+        ++it;
+        for (auto &op :
+             std::ranges::subrange(instr.def_begin(), instr.def_end())) {
+          if (!op.isSSARegDef())
+            continue;
+          Reg reg = regInfo.createVReg(op.ssaDef().type());
+          op.ssaDef().replace(reg);
+        }
+      }
+    }
   }
 };

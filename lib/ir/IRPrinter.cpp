@@ -23,12 +23,14 @@ void PrintIRVisitor::printNumberedDef(Operand &op) {
       std::cout << "unnamed(";
       break;
     case Operand::SSA_DEF_EXTERN: {
-      ExternSSADef &def = op.ssaDefOther();
+      ExternSSADef &def = op.ssaDefExtern();
       if (def.isGlobal()) {
         std::cout << "global(";
         std::cout << def.global().getName();
-      } else if (auto *m = as_dyn<MemoryAccessDef>(def)) {
-        std::cout << "mem(" << m->getSize() << "," << m->getAlign().getExp();
+      } else if (auto *d = as_dyn<MemoryAccessDef>(def)) {
+        std::cout << "mem(" << d->getSize() << "," << d->getAlign().getExp();
+      } else if (auto *d = as_dyn<FrameDef>(def)) {
+        std::cout << "frame(" << d->getId();
       } else {
         std::cout << "unknown(";
       }
@@ -86,7 +88,7 @@ void PrintIRVisitor::visitProgram(Program &prog) {
 void PrintIRVisitor::visitFunction(Function &func) {
   numbering.dispatch(func);
   for (auto &b : func) {
-    std::cout << "%" << numbering.getNum(b.getDef()).value() << ":\n";
+    std::cout << "%" << numbering.getNum(b.operand()).value() << ":\n";
     dispatch(b);
   }
 }
@@ -121,7 +123,7 @@ void PrintIRVisitor::visitOperand(Operand &op) {
     break;
   case Operand::SSA_DEF_TYPE:
     std::cout << "def(%" << numbering.defNum(op) << ",";
-    printSSAType(op.ssaDefType());
+    printSSAType(op.ssaDef().type());
     std::cout << ")";
     break;
   case Operand::SSA_USE:
@@ -139,12 +141,12 @@ void PrintIRVisitor::visitOperand(Operand &op) {
     printSSAType(op.type());
     break;
   case Operand::BLOCK:
-    printNumberedDef(op.block().getDef());
+    printNumberedDef(op.block().operand());
     break;
-  case Operand::CHAIN: {
+  case Operand::OP_CHAIN: {
     bool first = true;
     std::cout << "[";
-    for (auto &o : op.chain()) {
+    for (auto &o : op.opChain()) {
       if (first) {
         first = false;
       } else {
@@ -169,7 +171,7 @@ void PrintIRVisitor::visitOperand(Operand &op) {
 
 void NumberingIRVisitor::visitFunction(Function &func) {
   for (auto &block : func) {
-    defNum(block.getDef());
+    defNum(block.operand());
   }
   for (auto &block : func) {
     dispatch(block);

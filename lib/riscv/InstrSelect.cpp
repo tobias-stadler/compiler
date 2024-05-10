@@ -6,13 +6,13 @@
 namespace {
 
 unsigned selectExtShiftBits(Operand &op) {
-  return riscv::XLEN - static_cast<IntSSAType &>(op.ssaDefType()).getBits();
+  return riscv::XLEN - static_cast<IntSSAType &>(op.ssaDef().type()).getBits();
 }
 
 bool isLegalImm(Operand &op) { return op.mInt().canSTrunc(12); }
 bool isLegalImmNegated(Operand &op) { return (-op.mInt()).canSTrunc(12); }
 bool isLegalMemAccess(Operand &op, size_t alignExp) {
-  MemoryAccessDef &mem = as<MemoryAccessDef>(op.ssaDefOther());
+  MemoryAccessDef &mem = op.ssaDefExtern<MemoryAccessDef>();
   return mem.getSize() == (1UL << alignExp) &&
          mem.getAlign().getExp() == alignExp;
 }

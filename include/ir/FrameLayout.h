@@ -11,20 +11,20 @@ class FrameDef : public ExternSSADef {
 
 public:
   static bool is_impl(const ExternSSADef &o) {
-    return o.getKind() == LOCAL_FRAME;
+    return o.getKind() == FUNC_FRAME;
   }
 
   FrameDef(int32_t id, size_t size, Alignment align)
-      : ExternSSADef(LOCAL_FRAME), id(id), size(size), align(align) {}
+      : ExternSSADef(FUNC_FRAME), id(id), size(size), align(align) {}
 
-  int32_t getId() const { return id; }
+  size_t getId() const { return id; }
 
   size_t getSize() { return size; }
 
   Alignment getAlign() { return align; }
 
 private:
-  int32_t id;
+  size_t id;
   size_t size;
   Alignment align;
 };

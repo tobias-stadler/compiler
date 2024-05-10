@@ -3,8 +3,8 @@
 #include "ir/IRPass.h"
 #include "ir/IRPrinter.h"
 #include "ir/InstrBuilder.h"
-#include "ir/RegTracking.h"
 #include "support/DynBitSet.h"
+#include "support/PackedSet.h"
 #include <cassert>
 #include <compare>
 #include <iostream>
@@ -32,7 +32,7 @@ public:
   void run(Function &func, IRInfo<Function> &info) override {
     data.blockLive.clear();
     arch = &info.getArch();
-    regTrack = &info.query<RegTracking>();
+    regInfo = &func.getRegInfo();
 
     std::vector<Block *> workList;
     for (auto &block : func) {
@@ -56,20 +56,19 @@ public:
         auto phi = PhiInstrPtr(&instr);
         for (int i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
           auto &predBlockLive = data.blockLive[&phi.getPredecessorBlock(i)];
-          predBlockLive.liveOutNew.push_back(
-              regTrack->getRegForSSADef(phi.getPredecessorDef(i)));
+          predBlockLive.liveOutNew.push_back(phi.getPredecessorDef(i).reg());
         }
-        Reg reg = regTrack->getRegForSSADef(instr.getDef());
+        Reg reg = instr.getDef().reg();
         blockLive.liveIn.insert(reg);
         regExposed.erase(reg);
         continue;
       }
 
       for (auto &op : instr) {
-        auto [reg, isDef] = regTrack->getRegForOperand(op);
-        if (!reg)
+        if (!op.isReg())
           continue;
-        if (isDef) {
+        Reg reg = op.reg();
+        if (op.isRegDef()) {
           if (ignoreReg(*arch, reg))
             continue;
           blockLive.defs.insert(reg);
@@ -83,7 +82,7 @@ public:
     }
 
     blockLive.liveIn.insert(regExposed.begin(), regExposed.end());
-    for (auto &blockUse : block.getDef().ssaDef()) {
+    for (auto &blockUse : block.operand().ssaDef()) {
       Block &pred = blockUse.getParentBlock();
       auto &predBlockLive = data.blockLive[&pred];
       predBlockLive.liveOutNew.insert(predBlockLive.liveOutNew.end(),
@@ -110,7 +109,7 @@ public:
       if (!blockLive.liveIn.insert(op).second) {
         continue;
       }
-      for (auto &blockUse : block.getDef().ssaDef()) {
+      for (auto &blockUse : block.operand().ssaDef()) {
         Block &pred = blockUse.getParentBlock();
         auto &predBlockLive = data.blockLive[&pred];
         predBlockLive.liveOutNew.push_back(op);
@@ -132,7 +131,7 @@ public:
 private:
   LiveFlow data;
   Arch *arch;
-  RegTracking *regTrack;
+  RegInfo *regInfo;
 };
 
 class PrintLiveFlowPass : public IRPass<Function> {
@@ -144,7 +143,7 @@ class PrintLiveFlowPass : public IRPass<Function> {
     std::cout << "-- LivenessFlow --\n";
     for (auto &block : func) {
       auto blockLive = regLive.blockLive[&block];
-      printer.printNumberedDef(block.getDef());
+      printer.printNumberedDef(block.operand());
       std::cout << ":\n";
 
       std::cout << "LiveIn:";
@@ -258,7 +257,6 @@ class LiveIntervalsPass : public IRPass<Function> {
   void run(Function &func, IRInfo<Function> &info) override {
     arch = &info.getArch();
     intervals = LiveIntervals();
-    regTrack = &info.query<RegTracking>();
     flow = &info.query<LiveFlow>();
     numberInstructions(func);
     buildIntervals(func);
@@ -289,10 +287,10 @@ class LiveIntervalsPass : public IRPass<Function> {
         if (instr.isPhi())
           continue;
         for (auto &op : instr) {
-          auto [reg, isDef] = regTrack->getRegForOperand(op);
-          if (!reg)
+          if (!op.isReg())
             continue;
-          if (isDef) {
+          Reg reg = op.reg();
+          if (op.isRegDef()) {
             if (LiveFlowPass::ignoreReg(*arch, reg))
               continue;
             defReg(reg, instr, live);
@@ -333,7 +331,6 @@ class LiveIntervalsPass : public IRPass<Function> {
   }
 
   LiveFlow *flow;
-  RegTracking *regTrack;
   Arch *arch;
   LiveIntervals intervals;
 };
@@ -378,18 +375,156 @@ class PrintLiveIntervalsPass : public IRPass<Function> {
   }
 };
 
-class LiveSet {
+class PhysLiveSet {
 public:
-  LiveSet() {}
-  LiveSet(size_t sz) : bits(sz) {}
+  PhysLiveSet() {}
+  PhysLiveSet(size_t sz) : bits(sz) {}
 
-  void insert(Reg reg) { bits.set(reg.getIdx()); }
+  void insert(Reg reg) {
+    assert(reg.isPhysReg());
+    bits.set(reg.getNum());
+  }
 
-  void erase(Reg reg) { bits.clr(reg.getIdx()); }
+  void insert(const PhysLiveSet &o) { bits |= o.bits; }
 
-  bool contains(Reg reg) { return bits.tst(reg.getIdx()); }
+  void erase(Reg reg) {
+    assert(reg.isPhysReg());
+    bits.clr(reg.getNum());
+  }
+
+  bool contains(Reg reg) const {
+    assert(reg.isPhysReg());
+    return bits.tst(reg.getNum());
+  }
+
+  size_t size() { return bits.count(); }
+
+  void clear() { bits.clrAll(); }
 
   DynBitSet bits;
+};
+
+class VLiveSet {
+  using IdxSet = PackedSet<Reg::num_t>;
+
+public:
+  VLiveSet() {}
+  VLiveSet(size_t numVRegs) : idxSet(numVRegs) {}
+
+  bool insert(Reg reg) {
+    assert(reg.isVReg());
+    return idxSet.insert(reg.getIdx());
+  }
+
+  bool erase(Reg reg) {
+    assert(reg.isVReg());
+    return idxSet.erase(reg.getIdx());
+  }
+
+  bool contains(Reg reg) const {
+    assert(reg.isVReg());
+    return idxSet.contains(reg.getIdx());
+  }
+
+  size_t size() const { return idxSet.size(); }
+
+  bool empty() const { return idxSet.empty(); }
+
+  std::vector<Reg> toVector() {
+    std::vector<Reg> res;
+    for (auto reg : *this) {
+      res.push_back(reg);
+    }
+    return res;
+  }
+
+  template <std::forward_iterator It> void insert(It begin, It end) {
+    for (auto it = begin; it != end; ++it) {
+      insert(*it);
+    }
+  }
+
+  void clear() { idxSet.clear(); }
+
+  class iterator {
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = Reg;
+    using difference_type = std::ptrdiff_t;
+
+    iterator() : it(nullptr) {}
+    iterator(IdxSet::iterator it) : it(it) {}
+
+    Reg operator*() const { return Reg::vReg(*it); }
+
+    iterator &operator++() {
+      ++it;
+      return *this;
+    }
+
+    iterator operator++(int) {
+      iterator tmp(*this);
+      ++(*this);
+      return tmp;
+    }
+
+    friend bool operator==(const iterator &a, const iterator &b) {
+      return a.it == b.it;
+    }
+
+  private:
+    IdxSet::iterator it;
+  };
+  static_assert(std::forward_iterator<iterator>);
+
+  iterator begin() const { return idxSet.begin(); }
+  iterator end() const { return idxSet.end(); }
+
+private:
+  IdxSet idxSet;
+};
+
+class LiveSet {
+public:
+  LiveSet(size_t numVRegs, size_t numPhysRegs)
+      : virt(numVRegs), phys(numPhysRegs) {}
+
+  void insert(Reg reg) {
+    if (reg.isPhysReg()) [[unlikely]] {
+      phys.insert(reg);
+      return;
+    }
+    virt.insert(reg);
+  }
+
+  void erase(Reg reg) {
+    if (reg.isPhysReg()) [[unlikely]] {
+      phys.erase(reg);
+      return;
+    }
+    virt.erase(reg);
+  }
+
+  bool contains(Reg reg) {
+    if (reg.isPhysReg()) [[unlikely]] {
+      return phys.contains(reg);
+    }
+    return virt.contains(reg);
+  }
+
+  void clear() {
+    virt.clear();
+    phys.clear();
+  }
+
+  template <std::forward_iterator It> void insert(It begin, It end) {
+    for (auto it = begin; it != end; ++it) {
+      insert(*it);
+    }
+  }
+
+  VLiveSet virt;
+  PhysLiveSet phys;
 };
 
 class LiveGraph {
@@ -400,17 +535,20 @@ public:
   static const IRInfoID ID;
 
   struct VLive {
-    VLive(size_t numPhysRegs) : physLive(numPhysRegs) {}
-    LiveSet physLive;
-    std::vector<size_t> adjVLive;
-    bool ignore = false;
+    friend class LiveGraph;
+
+    VLive(size_t numPhysRegs) : phys(numPhysRegs) {}
+    PhysLiveSet phys;
+    std::vector<Reg> virt;
+    bool ignore = true;
+    size_t degree;
   };
 
   LiveGraph(size_t numVRegs, size_t numPhysRegs)
       : numVRegs(numVRegs), numPhysRegs(numPhysRegs), adjVLive(numVRegs) {
-    vLive.reserve(numVRegs);
+    vRegs.data.reserve(numVRegs);
     for (size_t i = 0; i < numVRegs; ++i) {
-      vLive.emplace_back(numPhysRegs);
+      vRegs.data.emplace_back(numPhysRegs);
     }
   }
 
@@ -424,19 +562,98 @@ public:
     }
   }
 
+  void addEdges(Reg reg, LiveSet &live) {
+    if (reg.isPhysReg()) {
+      for (auto oReg : live.virt) {
+        addPhysEdge(oReg, reg);
+      }
+    } else {
+      vRegs[reg].phys.bits |= live.phys.bits;
+      for (auto oReg : live.virt) {
+        addVEdge(reg, oReg);
+      }
+    }
+  }
+
   void addVEdge(Reg v1, Reg v2) {
     assert(v1.isVReg() && v2.isVReg());
     if (adjVLive.tst(v1.getIdx(), v2.getIdx())) {
       return;
     }
     adjVLive.set(v1.getIdx(), v2.getIdx());
-    getVLive(v1).adjVLive.push_back(v2.getIdx());
-    getVLive(v2).adjVLive.push_back(v1.getIdx());
+    auto &v1Live = vRegs[v1];
+    auto &v2Live = vRegs[v2];
+    v1Live.virt.push_back(v2);
+    v2Live.virt.push_back(v1);
   }
 
   void addPhysEdge(Reg v, Reg phys) {
     assert(v.isVReg() && phys.isPhysReg());
-    getVLive(v).physLive.insert(phys);
+    vRegs[v].phys.insert(phys);
+  }
+
+  VRegMap<VLive> vRegs;
+
+  size_t getNumVRegs() { return numVRegs; }
+  size_t getNumPhysRegs() { return numPhysRegs; }
+
+  class neighbor_iterator {
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = std::pair<Reg, VLive &>;
+    using difference_type = std::ptrdiff_t;
+    using pointer = value_type *;
+    using reference = value_type &;
+    using It = std::vector<Reg>::iterator;
+
+    neighbor_iterator() {}
+    neighbor_iterator(LiveGraph &graph, It it) : graph(&graph), it(it) {}
+
+    value_type operator*() const { return {*it, graph->vRegs[*it]}; }
+
+    neighbor_iterator &operator++() {
+      ++it;
+      return *this;
+    }
+
+    neighbor_iterator operator++(int) {
+      neighbor_iterator tmp(*this);
+      ++(*this);
+      return tmp;
+    }
+
+    friend bool operator==(const neighbor_iterator &a,
+                           const neighbor_iterator &b) {
+      return a.it == b.it;
+    }
+
+  private:
+    LiveGraph *graph;
+    It it;
+  };
+  static_assert(std::forward_iterator<neighbor_iterator>);
+
+  auto neighbors(Reg reg) {
+    auto &v = vRegs[reg];
+    return Range{neighbor_iterator(*this, v.virt.begin()),
+                 neighbor_iterator(*this, v.virt.end())};
+  }
+
+  void ignore(Reg reg) {
+    auto &v = vRegs[reg];
+    assert(!v.ignore);
+    v.ignore = true;
+    for (auto [oReg, oLive] : neighbors(reg)) {
+      assert(oLive.degree > 0);
+      --oLive.degree;
+    }
+  }
+
+  void resetIgnore() {
+    for (auto [reg, v] : vRegs) {
+      v.ignore = false;
+      v.degree = v.phys.size() + v.virt.size();
+    }
   }
 
 private:
@@ -444,12 +661,6 @@ private:
   size_t numPhysRegs;
 
   TriBitSet adjVLive;
-  std::vector<VLive> vLive;
-
-  VLive &getVLive(Reg reg) {
-    assert(reg.isVReg());
-    return vLive[reg.getIdx()];
-  }
 };
 
 class LiveGraphPass : public IRPass<Function> {
@@ -457,12 +668,13 @@ class LiveGraphPass : public IRPass<Function> {
 
   void run(Function &func, IRInfo<Function> &info) override {
     arch = &info.getArch();
-    regTrack = &info.query<RegTracking>();
     flow = &info.query<LiveFlow>();
-    graph = std::make_unique<LiveGraph>(regTrack->getNumVRegs(),
-                                        arch->getArchRegs().size());
+    size_t numVRegs = func.getRegInfo().getNumVRegs();
+    size_t numPhysRegs = arch->getArchRegs().size() + 1;
+    graph = std::make_unique<LiveGraph>(numVRegs, numPhysRegs);
+    LiveSet live(numVRegs, numPhysRegs);
     for (auto &block : func) {
-      buildGraphForBlock(block);
+      buildGraphForBlock(block, live);
     }
     info.publish(*graph);
     info.preserveAll();
@@ -477,24 +689,23 @@ class LiveGraphPass : public IRPass<Function> {
     graph = nullptr;
   }
 
-  void buildGraphForBlock(Block &block) {
+  void buildGraphForBlock(Block &block, LiveSet &live) {
     auto &blockLive = flow->blockLive[&block];
-    auto live = blockLive.liveOut;
+    live.clear();
+    live.insert(blockLive.liveOut.begin(), blockLive.liveOut.end());
     for (auto &instr : block | std::views::reverse) {
       if (instr.isPhi())
         continue;
       for (auto &op : instr) {
-        auto [reg, isDef] = regTrack->getRegForOperand(op);
-        if (!reg)
+        if (!op.isReg())
           continue;
-        if (isDef) {
+        Reg reg = op.reg();
+        if (op.isRegDef()) {
           if (LiveFlowPass::ignoreReg(*arch, reg))
             continue;
           // FIXME: should multiple defs always interfere with each other?
           live.erase(reg);
-          for (auto oReg : live) {
-            graph->addEdge(reg, oReg);
-          }
+          graph->addEdges(reg, live);
         } else {
           if (LiveFlowPass::ignoreReg(*arch, reg))
             continue;
@@ -507,7 +718,6 @@ class LiveGraphPass : public IRPass<Function> {
 private:
   std::unique_ptr<LiveGraph> graph;
   LiveFlow *flow;
-  RegTracking *regTrack;
   Arch *arch;
 };
 
@@ -520,7 +730,7 @@ class PrintLiveGraphPass : public IRPass<Function> {
 
     for (size_t i = 0; i < graph.numVRegs; ++i) {
       std::cout << i << ":\n";
-      printVLive(graph.vLive[i]);
+      printVLive(graph.vRegs[i]);
     }
 
     info.preserveAll();
@@ -528,13 +738,13 @@ class PrintLiveGraphPass : public IRPass<Function> {
 
   void printVLive(LiveGraph::VLive v) {
     std::cout << "  Phys:";
-    v.physLive.bits.for_each([this](auto i) {
+    v.phys.bits.for_each([this](auto i) {
       std::cout << " ";
       printer->printReg(i);
     });
     std::cout << "\n";
     std::cout << "  Virt:";
-    for (auto i : v.adjVLive) {
+    for (auto i : v.virt) {
       std::cout << " ";
       printer->printReg(Reg::vReg(i));
     }

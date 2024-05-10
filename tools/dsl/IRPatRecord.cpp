@@ -122,8 +122,8 @@ void IRPatternRecord::genInstrMatch(InstrPat &instrPat,
       }
       if (!op.type.empty()) {
         code.println(std::format(
-            "if({}.getOperand({}).ssaDefType() != {}) return false;", instrVar,
-            opNum, genType(op.type).second));
+            "if({}.getOperand({}).ssaDef().type() != {}) return false;",
+            instrVar, opNum, genType(op.type).second));
       }
       break;
     case OperandPat::SSA_USE: {

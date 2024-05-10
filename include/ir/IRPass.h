@@ -3,7 +3,6 @@
 #include "ir/Arch.h"
 #include "ir/IR.h"
 #include <cassert>
-#include <cstdlib>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,10 +26,14 @@ public:
   virtual void invalidate(IRInfo<PassT> &) {}
 };
 
-template <typename PassT> class PassContext {
-public:
-  PassContext() {}
-  PassContext(IRPass<PassT> *pass, PassT *passObj) : pass(pass), obj(passObj) {}
+template <typename PassT> class IRPipelineInfo;
+
+template <typename PassT> struct IRPassContext {
+  IRPassContext() {}
+  IRPassContext(IRPipelineInfo<PassT> *pipeline, IRPass<PassT> *pass,
+                PassT *passObj)
+      : pipeline(pipeline), pass(pass), obj(passObj) {}
+  IRPipelineInfo<PassT> *pipeline = nullptr;
   IRPass<PassT> *pass = nullptr;
   PassT *obj = nullptr;
   bool preserveAll = false;
@@ -39,67 +42,110 @@ public:
 };
 
 template <typename PassT> class IRInfo {
-  friend class IRPipeline<PassT>;
-
 public:
-  IRInfo() {}
+  IRInfo(IRPassContext<PassT> &ctx) : ctx(ctx) {}
 
   template <typename T> void advertise() {
-    assert(advertiser.find(&T::ID) == advertiser.end() &&
-           "Multiple passes advertise the same data.");
-    advertiser.try_emplace(&T::ID, ctx.pass);
+    ctx.pipeline->advertise(ctx, &T::ID);
   }
 
   template <typename T> void publish(T &val) {
-    publisher[&T::ID] = {ctx.pass, &val};
-    preserve<T>();
+    ctx.pipeline->publish(ctx, &T::ID, &val);
   }
 
-  template <typename T> T &query(bool forceRun = false) {
-    auto it = forceRun ? publisher.end() : publisher.find(&T::ID);
-    void *dataPtr = nullptr;
-    if (it == publisher.end()) {
-      auto &pass = getAdvertisingPass(&T::ID);
-      std::cout << "----> Running pass in query: " << pass.name() << "\n";
-      run(pass, *ctx.obj);
-      auto it2 = publisher.find(&T::ID);
-      assert(it2 != publisher.end() &&
-             "Advertised pass did not publish promised data.");
-      dataPtr = it2->second.dataPtr;
-    } else {
-      dataPtr = it->second.dataPtr;
-    }
-    return *static_cast<T *>(dataPtr);
+  template <typename T> T &query() {
+    return *static_cast<T *>(ctx.pipeline->runQuery(ctx, &T::ID));
   }
 
   template <typename T> void retract() { ctx.retracted.push_back(&T::ID); }
 
   template <typename T> void preserve() { ctx.preserved.insert(&T::ID); }
 
+  template <typename T> void invalidate() {
+    ctx.pipeline->runInvalidate(ctx, &T::ID);
+  }
+
   void preserveAll() { ctx.preserveAll = true; }
 
   Arch &getArch() {
-    assert(arch);
-    return *arch;
+    assert(ctx.pipeline->arch);
+    return *ctx.pipeline->arch;
   }
 
-  Arch *getArchUnchecked() { return arch; }
+  Arch *getArchUnchecked() { return ctx.pipeline->arch; }
 
 private:
+  IRPassContext<PassT> &ctx;
+};
+
+template <typename PassT> class IRPipelineInfo {
+  friend class IRInfo<PassT>;
+  friend class IRPipeline<PassT>;
+
+public:
   struct PublishedData {
     IRPass<PassT> *pass = nullptr;
     void *dataPtr = nullptr;
   };
 
-  void run(IRPass<PassT> &pass, PassT &obj) {
-    PassContext oldCtx = std::move(ctx);
-    ctx = PassContext(&pass, &obj);
-    pass.run(obj, *this);
-    invalidate();
-    ctx = std::move(oldCtx);
+  void reset() { publisher.clear(); }
+
+  void advertise(IRPassContext<PassT> &ctx, IRInfoID id) {
+    assert(advertiser.find(id) == advertiser.end() &&
+           "Multiple passes advertise the same data.");
+    advertiser.try_emplace(id, ctx.pass);
   }
 
-  void invalidate() {
+  void runAdvertise(IRPass<PassT> &pass) {
+    IRPassContext<PassT> ctx(this, &pass, nullptr);
+    IRInfo<PassT> info(ctx);
+    pass.advertise(info);
+  }
+
+  void publish(IRPassContext<PassT> &ctx, IRInfoID id, void *val) {
+    publisher[id] = {ctx.pass, val};
+    ctx.preserved.insert(id);
+  }
+
+  void *runQuery(IRPassContext<PassT> &ctx, IRInfoID id) {
+    auto it = publisher.find(id);
+    void *dataPtr = nullptr;
+    if (it == publisher.end()) {
+      auto &pass = getAdvertisingPass(id);
+      std::cout << "----> Running pass in query: " << pass.name() << "\n";
+      run(pass, *ctx.obj);
+      auto it2 = publisher.find(id);
+      assert(it2 != publisher.end() &&
+             "Advertised pass did not publish promised data.");
+      dataPtr = it2->second.dataPtr;
+    } else {
+      dataPtr = it->second.dataPtr;
+    }
+    assert(dataPtr);
+    return dataPtr;
+  }
+
+  void run(IRPass<PassT> &pass, PassT &obj) {
+    IRPassContext<PassT> ctx(this, &pass, &obj);
+    IRInfo<PassT> info(ctx);
+    pass.run(obj, info);
+    runInvalidate(ctx);
+  }
+
+  void runInvalidate(IRPassContext<PassT> &ctx, IRInfoID id) {
+    auto it = publisher.find(id);
+    if (it == publisher.end())
+      return;
+    auto *pass = it->second.pass;
+    IRPassContext<PassT> invalidateCtx(this, pass, ctx.obj);
+    IRInfo<PassT> info(invalidateCtx);
+    pass->invalidate(info);
+    for (auto id : invalidateCtx.retracted) {
+      publisher.erase(id);
+    }
+  }
+
+  void runInvalidate(IRPassContext<PassT> &ctx) {
     assert(ctx.retracted.empty());
     if (ctx.preserveAll) {
       return;
@@ -110,8 +156,9 @@ private:
         continue;
       passesToInvalidate.insert(data.pass);
     }
+    IRInfo<PassT> info(ctx);
     for (auto *pass : passesToInvalidate) {
-      pass->invalidate(*this);
+      pass->invalidate(info);
     }
     for (auto id : ctx.retracted) {
       publisher.erase(id);
@@ -125,14 +172,9 @@ private:
     return *it->second;
   }
 
-  void reset() {
-    ctx = PassContext<PassT>();
-    publisher.clear();
-  }
-
+private:
   std::unordered_map<IRInfoID, PublishedData> publisher;
   std::unordered_map<IRInfoID, IRPass<PassT> *> advertiser;
-  PassContext<PassT> ctx;
   Arch *arch = nullptr;
 };
 
@@ -145,8 +187,7 @@ public:
   }
 
   void addLazyPass(std::unique_ptr<IRPass<PassT>> pass) {
-    info.ctx = PassContext<PassT>(pass.get(), nullptr);
-    pass->advertise(info);
+    info.runAdvertise(*pass);
     lazyPasses.push_back(std::move(pass));
   }
 
@@ -159,7 +200,7 @@ public:
   }
 
 private:
-  IRInfo<PassT> info;
+  IRPipelineInfo<PassT> info;
   std::vector<std::unique_ptr<IRPass<PassT>>> sequencedPasses;
   std::vector<std::unique_ptr<IRPass<PassT>>> lazyPasses;
 };

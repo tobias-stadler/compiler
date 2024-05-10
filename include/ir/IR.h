@@ -3,15 +3,11 @@
 #include "ir/FrameLayout.h"
 #include "ir/MemoryAccess.h"
 #include "ir/Operand.h"
+#include "ir/RegInfo.h"
 #include "support/IntrusiveList.h"
-#include "support/RTTI.h"
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
-#include <iterator>
 #include <memory>
-#include <new>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -75,6 +71,7 @@ public:
   std::vector<SSAType *> returnTypes;
 
   FrameLayout &getFrameLayout() { return frameLayout; }
+  RegInfo &getRegInfo() { return regInfo; }
 
   template <typename... Args>
   MemoryAccessDef &createMemoryAccess(Args... args) {
@@ -84,6 +81,7 @@ public:
 
 private:
   FrameLayout frameLayout;
+  RegInfo regInfo;
   std::vector<std::unique_ptr<MemoryAccessDef>> memoryAccess;
 };
 
@@ -92,12 +90,12 @@ class Block : public IntrusiveList<Instr, Block>,
               public ExternSSADef {
 public:
   static bool is_impl(const ExternSSADef &o) {
-    return o.getKind() == LOCAL_BLOCK;
+    return o.getKind() == FUNC_BLOCK;
   }
 
-  Block() : ExternSSADef(LOCAL_BLOCK) {}
+  Block() : ExternSSADef(FUNC_BLOCK) {}
 
-  unsigned getNumPredecessors() { return getDef().ssaDef().getNumUses(); }
+  unsigned getNumPredecessors() { return operand().ssaDef().getNumUses(); }
 
   IntrusiveListNode<Instr, Block> &getFirstNonPhiSentry();
 
@@ -109,6 +107,7 @@ public:
   enum Kind {
     EMPTY,
     INSTR_START,
+    UNDEFINED,
     CONST_INT,
     PHI,
     ADD,
@@ -245,6 +244,9 @@ public:
     case INSTR_END:
     case ARCH_INSTR:
       return "INVALID";
+    case UNDEFINED:
+      return "UNDEFINED";
+      break;
     }
     return "UNKOWN";
   }
@@ -301,12 +303,12 @@ public:
     assert(cap > 0);
     capacity = cap + 1;
     operands = new Operand[capacity];
-    operands[cap].emplace<Operand::CHAIN>(this);
+    operands[cap].emplace<Operand::OP_CHAIN>(this);
   }
 
   bool isVariadic() {
     assert(operands);
-    return operands[capacity - 1].getKind() == Operand::CHAIN;
+    return operands[capacity - 1].getKind() == Operand::OP_CHAIN;
   }
 
   Operand &getOperand(unsigned n) {

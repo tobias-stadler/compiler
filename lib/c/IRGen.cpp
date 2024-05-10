@@ -304,7 +304,7 @@ public:
     }
     if (offset) {
       ir->emitConstInt(
-          MInt{tmpOperand->ssaDefType().intType().getBits(), offset});
+          MInt{tmpOperand->ssaDef().type().intType().getBits(), offset});
       ir->emitAdd(*tmpOperand, ir.getDef());
       tmpOperand = &ir.getDef();
     }
@@ -374,8 +374,8 @@ public:
 
       dispatch(ast.getLHS());
       sema.expectPromotedInt();
-      if (rhs.tmpOperand->ssaDefType() != tmpOperand->ssaDefType()) {
-        ir->emitExtOrTrunc(Instr::EXT_Z, tmpOperand->ssaDefType(),
+      if (rhs.tmpOperand->ssaDef().type() != tmpOperand->ssaDef().type()) {
+        ir->emitExtOrTrunc(Instr::EXT_Z, tmpOperand->ssaDef().type(),
                            *rhs.tmpOperand);
         rhs.tmpOperand = &ir.getDef();
       }
@@ -584,7 +584,7 @@ public:
   }
 
   ExpressionSemantics::Result semanticConvBool() {
-    ir->emitConstInt(MInt::zero(tmpOperand->ssaDefType().intType().getBits()));
+    ir->emitConstInt(MInt::zero(tmpOperand->ssaDef().type().intType().getBits()));
     ir->emitCmp(BrCond::ne(), *tmpOperand, ir.getDef());
     tmpOperand = &ir.getDef();
     return ExpressionSemantics::SUCCESS;

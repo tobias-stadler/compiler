@@ -1,4 +1,5 @@
 #include "riscv/PreISelExpansion.h"
+#include "ir/SSAInstrBuilder.h"
 #include "riscv/Arch.h"
 #include <cassert>
 
@@ -9,35 +10,35 @@ namespace {
 IntSSAType &XTy = IntSSAType::get(riscv::XLEN);
 
 void legalizeSSAUse(Instr::Kind ext, Operand &op, IntSSAType &expectedTy,
-                    InstrBuilder &ir) {
+                    SSAInstrBuilder &ir) {
   assert(op.isSSAUse());
   Operand &def = op.ssaUse().getDef();
-  if (!def.isSSARegDef() || def.ssaDefType().getKind() != SSAType::INT) {
+  if (!def.isSSARegDef() || def.ssaDef().type().getKind() != SSAType::INT) {
     return;
   }
-  IntSSAType &intTy = static_cast<IntSSAType &>(def.ssaDefType());
+  IntSSAType &intTy = static_cast<IntSSAType &>(def.ssaDef().type());
   if (intTy.getBits() < expectedTy.getBits()) {
     ir.emitExt(ext, expectedTy, op.ssaUse().getDef());
-    op.ssaUseReplace(ir.getDef());
+    op.ssaUse().replace(ir.getDef());
   }
 }
 
-void legalizeSSADef(Operand &op, IntSSAType &expectedTy, InstrBuilder &ir) {
+void legalizeSSADef(Operand &op, IntSSAType &expectedTy, SSAInstrBuilder &ir) {
   assert(op.isSSADef());
-  SSAType &ty = op.ssaDefType();
+  SSAType &ty = op.ssaDef().type();
   if (ty.getKind() != SSAType::INT) {
     return;
   }
   IntSSAType &intTy = static_cast<IntSSAType &>(ty);
   if (intTy.getBits() < expectedTy.getBits()) {
-    op.ssaDefSetType(expectedTy);
+    op.ssaDef().setType(expectedTy);
     ir.emitTrunc(intTy, op);
     op.ssaDef().replaceAllUses(ir.getDef());
-    ir.getLastInstr()->getOperand(1).ssaUseReplace(op);
+    ir.getLastInstr()->getOperand(1).ssaUse().replace(op);
   }
 }
-void legalizeOperand(Instr::Kind ext, Operand &op, InstrBuilder &preIr,
-                     InstrBuilder &postIr) {
+void legalizeOperand(Instr::Kind ext, Operand &op, SSAInstrBuilder &preIr,
+                     SSAInstrBuilder &postIr) {
   if (op.isSSADef()) {
     legalizeSSADef(op, XTy, postIr);
   } else if (op.isSSAUse()) {
@@ -46,33 +47,33 @@ void legalizeOperand(Instr::Kind ext, Operand &op, InstrBuilder &preIr,
 }
 void legalizeOperands(Instr::Kind ext, Instr &instr,
                       std::initializer_list<Operand *> ops) {
-  InstrBuilder preIr(instr);
-  InstrBuilder postIr(instr.getNextNode());
+  SSAInstrBuilder preIr(instr);
+  SSAInstrBuilder postIr(instr.getNextNode());
   for (auto *op : ops) {
     legalizeOperand(ext, *op, preIr, postIr);
   }
 }
 
 void legalizeAllOperands(Instr::Kind ext, Instr &instr) {
-  InstrBuilder preIr(instr);
-  InstrBuilder postIr(instr.getNextNode());
+  SSAInstrBuilder preIr(instr);
+  SSAInstrBuilder postIr(instr.getNextNode());
   for (auto &op : instr) {
     legalizeOperand(ext, op, preIr, postIr);
   }
 }
 
 void legalizePhi(PhiInstrPtr phi) {
-  InstrBuilder postIr(phi->getNextNode());
+  SSAInstrBuilder postIr(phi->getNextNode());
   legalizeSSADef(phi->getDef(), XTy, postIr);
   for (int i = 0, iEnd = phi.getNumPredecessors(); i < iEnd; ++i) {
-    InstrBuilder preIr(phi.getPredecessorBlock(i).getLast());
+    SSAInstrBuilder preIr(phi.getPredecessorBlock(i).getLast());
     legalizeSSAUse(Instr::EXT_A, phi.getPredecessorUse(i), XTy, preIr);
   }
 }
 
 void legalizeCmp(Instr &instr) {
-  InstrBuilder preIr(instr);
-  InstrBuilder postIr(instr.getNextNode());
+  SSAInstrBuilder preIr(instr);
+  SSAInstrBuilder postIr(instr.getNextNode());
   Instr::Kind ext =
       instr.getOperand(1).brCond().isSigned() ? Instr::EXT_S : Instr::EXT_Z;
   legalizeSSADef(instr.getOperand(0), XTy, postIr);

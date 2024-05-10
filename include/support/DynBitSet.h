@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -25,7 +26,14 @@ public:
       : numBits(numBits), words(numWordsForBits(numBits)) {}
 
   size_t size() const { return numBits; }
-  bool empty() { return numBits == 0; }
+
+  size_t count() const {
+    size_t cnt = 0;
+    for (size_t i = 0; i < words.size(); ++i) {
+      cnt += std::popcount(words[i]);
+    }
+    return cnt;
+  }
 
   void set(size_t i) {
     assert(i < numBits);
@@ -53,9 +61,10 @@ public:
     for (size_t i = 0; i < words.size(); ++i) {
       words[i] = ~word_t(0);
     }
+    clrUndefined();
   }
 
-  bool tst(size_t i) { return words[wordIdx(i)] & bitMsk(i); }
+  bool tst(size_t i) const { return words[wordIdx(i)] & bitMsk(i); }
 
   DynBitSet &operator&=(const DynBitSet &o) {
     assert(isBinopCompatible(o));
@@ -77,9 +86,10 @@ public:
     for (size_t i = 0; i < words.size(); ++i) {
       words[i] = ~words[i];
     }
+    clrUndefined();
   }
 
-  template <typename CB> void for_each(CB cb) {
+  template <typename CB> void for_each(CB cb) const {
     for (size_t i = 0; i < numBits; ++i) {
       if (tst(i)) {
         cb(i);
@@ -93,6 +103,12 @@ private:
 
   bool isBinopCompatible(const DynBitSet &o) const {
     return numBits == o.numBits;
+  }
+
+  void clrUndefined() {
+    if (numBits % wordBits == 0)
+      return;
+    words[words.size() - 1] &= bitMsk(numBits) - 1;
   }
 };
 

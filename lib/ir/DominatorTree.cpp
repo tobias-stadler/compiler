@@ -48,7 +48,7 @@ void DominatorTreePass::computeSemiDominators() {
   tree->semiDominator = std::vector<int>(tree->numBlocks, -1);
   for (int w = tree->numBlocks - 1; w > 0; --w) {
     int sd = w;
-    for (auto &pred : tree->dfsPreorderBlock[w]->getDef().ssaDef()) {
+    for (auto &pred : tree->dfsPreorderBlock[w]->operand().ssaDef()) {
       int v = tree->dfsPreorderNum[&pred.getParentBlock()];
       if (v <= w) {
         sd = std::min(sd, v);
@@ -100,7 +100,7 @@ void PrintDominatorTreePass::run(Function &, IRInfo<Function> &info) {
   std::cout << "-- DominatorTree --\n";
   for (unsigned i = 0; i < domTree.numBlocks; ++i) {
     std::cout << "dfs: " << i << ", block: ";
-    printer.printNumberedDef(domTree.dfsPreorderBlock[i]->getDef());
+    printer.printNumberedDef(domTree.dfsPreorderBlock[i]->operand());
     std::cout << ", parent: " << domTree.dfsPreorderParent[i]
               << ", fParent: " << domTree.forestParent[i]
               << ", fLabel: " << domTree.forestLabel[i]

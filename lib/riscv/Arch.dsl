@@ -98,7 +98,8 @@ let X31 = Reg {
 }
 
 let GPR = RegClass {
-  let regs = dsl_list { X5 X6 X7 X28 X29 X30 X31 }
+  let regs = dsl_list { X5 X6 X7 X28 }
+  let regs2 = dsl_list { X5 X6 X7 X28 X29 X30 X31 }
 }
 
 let LUI = Instr {

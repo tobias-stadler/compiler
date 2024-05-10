@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ir/Operand.h"
+#include "ir/IR.h"
 #include <span>
 
 struct ArchReg {
@@ -22,10 +22,13 @@ struct ArchRegClass {
   const std::span<const ArchReg *> regs;
 };
 
+class ArchInstrBuilder;
+
 class Arch {
 public:
   virtual std::span<const ArchReg> getArchRegs() = 0;
   virtual const ArchReg *getArchReg(unsigned kind) = 0;
   virtual const ArchInstr *getArchInstr(unsigned kind) = 0;
   virtual const ArchRegClass *getArchRegClass(unsigned kind) = 0;
+  virtual const ArchInstrBuilder &getArchInstrBuilder() = 0;
 };
