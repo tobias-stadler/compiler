@@ -47,7 +47,7 @@ Function *Program::createFunction(std::string name) {
   if (!succ) {
     return nullptr;
   }
-  return functions.emplace_back(std::move(func)).get();
+  return functionStorage.emplace_back(std::move(func)).get();
 }
 
 void RegDefUse::insertDefUse() {
@@ -70,7 +70,7 @@ void SSADef::replaceAllUses(Reg reg) {
   for (DefUseChain *curr = chNext; curr != this;) {
     DefUseChain &tmp = *curr;
     curr = curr->chNext;
-    // FIXME: direct conversion without UB!
+    // TODO: direct conversion without UB!
     // tmp.contentReg = reg;
     // tmp.operand().kind = Operand::REG_USE;
     tmp.operand().data.emplace<Operand::REG_USE>(reg);

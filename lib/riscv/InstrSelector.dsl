@@ -331,6 +331,7 @@ ir_pat {
 }
 
 let isel = IRPatExecutor {
+
 !TruncExtPat {
   let IN = token {EXT_Z}
   let OUT = token {SRLI}
@@ -340,6 +341,14 @@ let isel = IRPatExecutor {
   let OUT = token {SRAI}
 }
 
+ir_pat {
+  match {
+    UNDEFINED def(%c,i32);
+  }
+  emit {
+    COPY def(%c,i32) riscv::X0;
+  }
+}
 ir_pat {
   match {
     CONST_INT def(%c,i32) MInt(32,0);

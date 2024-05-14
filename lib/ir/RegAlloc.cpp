@@ -1,3 +1,4 @@
 #include "ir/RegAlloc.h"
 
-const IRInfoID RegAlloc::ID = nullptr;
+const IRInfoID RegAssignment::ID = nullptr;
+const IRInfoID RegClobber::ID = nullptr;

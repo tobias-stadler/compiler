@@ -9,7 +9,7 @@
 #include <cassert>
 #include <set>
 
-class RegAlloc {
+class RegAssignment {
 public:
   static const IRInfoID ID;
 
@@ -23,12 +23,30 @@ public:
     Kind kind = NONE;
     Reg reg;
     size_t spillCost;
+
+    void assignPhysReg(Reg r) {
+      assert(r.isPhysReg());
+      kind = PHYS_REG;
+      reg = r;
+    }
+
+    void assignNoReg() { kind = NO_REG; }
   };
 
-  RegAlloc() {}
-  RegAlloc(size_t numVRegs) : vRegs(numVRegs) {}
+  RegAssignment() {}
+  RegAssignment(size_t numVRegs) : vRegs(numVRegs) {}
 
   VRegMap<Assignment> vRegs;
+};
+
+class RegClobber {
+public:
+  static const IRInfoID ID;
+
+  RegClobber() {}
+  RegClobber(size_t numPhysRegs) : phys(numPhysRegs) {}
+
+  PhysLiveSet phys;
 };
 
 /*
@@ -101,20 +119,40 @@ class RegRewritePass : public IRPass<Function> {
   const char *name() override { return "RegRewritePass"; }
 
   void run(Function &func, IRInfo<Function> &info) override {
-    RegAlloc &regAlloc = info.query<RegAlloc>();
+    clobber = RegClobber(info.getArch().getArchRegs().size());
+    RegAssignment &assignment = info.query<RegAssignment>();
 
     for (auto &block : func) {
-      for (auto &instr : block) {
+      for (auto &instr : make_earlyincr_range(block)) {
+        // Apply RegAlloc assignments
         for (auto &op : instr) {
           if (!op.isReg() || !op.reg().isVReg())
             continue;
-          auto &regAssign = regAlloc.vRegs[op.reg()];
-          assert(regAssign.kind == RegAlloc::Assignment::PHYS_REG);
+          auto &regAssign = assignment.vRegs[op.reg()];
+          assert(regAssign.kind == RegAssignment::Assignment::PHYS_REG);
           op.regDefUse().replace(regAssign.reg);
+        }
+        // Remove no-op copies
+        if (instr.isCopy()) {
+          if (instr.getOperand(0).reg() == instr.getOperand(1).reg()) {
+            instr.deleteThis();
+            continue;
+          }
+        }
+        // Track clobbered registers
+        for (auto &op : instr.defs()) {
+          if (!op.isRegDef())
+            continue;
+          assert(op.reg().isPhysReg());
+          clobber.phys.insert(op.reg());
         }
       }
     }
+
+    info.publish(clobber);
   }
+
+  RegClobber clobber;
 };
 
 class ColoringRegAllocPass : public IRPass<Function> {
@@ -132,16 +170,15 @@ class ColoringRegAllocPass : public IRPass<Function> {
     bool failed;
     do {
       graph = &info.query<LiveGraph>();
-      alloc = RegAlloc(graph->getNumVRegs());
+      assignment = RegAssignment(graph->getNumVRegs());
       virtSet = VLiveSet(graph->getNumVRegs());
       physSet = PhysLiveSet(graph->getNumPhysRegs());
-      graph = &info.query<LiveGraph>();
       simplify(regClass.regs.size());
       selectAll();
       spillAll();
       failed = false;
-      for (auto [reg, regAssign] : alloc.vRegs) {
-        if (regAssign.kind != RegAlloc::Assignment::PHYS_REG) {
+      for (auto [reg, regAssign] : assignment.vRegs) {
+        if (regAssign.kind != RegAssignment::Assignment::PHYS_REG) {
           failed = true;
           break;
         }
@@ -150,7 +187,7 @@ class ColoringRegAllocPass : public IRPass<Function> {
       info.invalidate<LiveGraph>();
     } while (failed);
 
-    info.publish(alloc);
+    info.publish(assignment);
   }
 
   void simplify(size_t k) {
@@ -158,6 +195,8 @@ class ColoringRegAllocPass : public IRPass<Function> {
     eliminationOrder.clear();
     graph->resetIgnore();
     virtSet.clear();
+
+    // Prune trivially colorable nodes
     for (auto [reg, vLive] : graph->vRegs) {
       if (vLive.degree < k) {
         eliminate(reg);
@@ -165,6 +204,8 @@ class ColoringRegAllocPass : public IRPass<Function> {
         virtSet.insert(reg);
       }
     }
+
+    // Eliminate other nodes driven by spill-cost
     calcSpillCost();
     while (!virtSet.empty()) {
       Reg spillReg = Reg();
@@ -175,8 +216,11 @@ class ColoringRegAllocPass : public IRPass<Function> {
           spillReg = Reg();
           break;
         }
+        // Minimize spillCost/degree
         if (!spillReg ||
-            alloc.vRegs[reg].spillCost < alloc.vRegs[spillReg].spillCost) {
+            assignment.vRegs[reg].spillCost * graph->vRegs[spillReg].degree <
+                assignment.vRegs[spillReg].spillCost *
+                    graph->vRegs[reg].degree) {
           spillReg = reg;
         }
       }
@@ -185,7 +229,8 @@ class ColoringRegAllocPass : public IRPass<Function> {
       eliminate(spillReg);
       virtSet.erase(spillReg);
       std::cout << "  might spill " << spillReg.getIdx() << " with cost "
-                << alloc.vRegs[spillReg].spillCost << "\n";
+                << assignment.vRegs[spillReg].spillCost << "/"
+                << graph->vRegs[spillReg].degree << "\n";
     }
   }
 
@@ -196,7 +241,8 @@ class ColoringRegAllocPass : public IRPass<Function> {
 
   void calcSpillCost() {
     for (auto reg : virtSet) {
-      alloc.vRegs[reg].spillCost = regInfo->defUseRoot(reg).count();
+      // TODO: better heuristic
+      assignment.vRegs[reg].spillCost = regInfo->defUseRoot(reg).count();
     }
   }
 
@@ -207,8 +253,8 @@ class ColoringRegAllocPass : public IRPass<Function> {
   }
 
   void spillAll() {
-    for (auto [reg, regAssign] : alloc.vRegs) {
-      if (regAssign.kind != RegAlloc::Assignment::NO_REG)
+    for (auto [reg, regAssign] : assignment.vRegs) {
+      if (regAssign.kind != RegAssignment::Assignment::NO_REG)
         continue;
       spillGlobal(reg);
     }
@@ -216,28 +262,60 @@ class ColoringRegAllocPass : public IRPass<Function> {
 
   void select(Reg reg) {
     std::cout << "select " << reg.getIdx() << ": ";
-    const ArchRegClass &regClass = *arch->getArchRegClass(1);
     physSet.clear();
-
     auto &regLive = graph->vRegs[reg];
-    auto &regAssign = alloc.vRegs[reg];
+    auto &regAssign = assignment.vRegs[reg];
+
+    // Accumulate all interfering registers
     physSet.insert(regLive.phys);
     for (auto oReg : regLive.virt) {
-      auto &oRegAssign = alloc.vRegs[oReg];
-      if (oRegAssign.kind != RegAlloc::Assignment::PHYS_REG)
+      auto &oRegAssign = assignment.vRegs[oReg];
+      if (oRegAssign.kind != RegAssignment::Assignment::PHYS_REG)
         continue;
       physSet.insert(oRegAssign.reg);
     }
+
+    // FIXME: cache this
+    const ArchRegClass &regClass = *arch->getArchRegClass(1);
+    PhysLiveSet regClassSet(graph->getNumPhysRegs());
     for (auto *archReg : regClass.regs) {
-      if (!physSet.contains(archReg->reg)) {
-        std::cout << "assign " << archReg->name << "\n";
-        regAssign.kind = RegAlloc::Assignment::PHYS_REG;
-        regAssign.reg = archReg->reg;
-        return;
-      }
+      regClassSet.insert(archReg->reg);
     }
+
+    // Try to respect a register hint
+    for (auto hintReg : regLive.coloringHints) {
+      std::cout << "try hint " << hintReg.getNum() << ", ";
+      if (hintReg.isVReg()) {
+        auto &hintRegAssign = assignment.vRegs[hintReg];
+        if (hintRegAssign.kind != RegAssignment::Assignment::PHYS_REG) {
+          continue;
+        }
+        hintReg = hintRegAssign.reg;
+        std::cout << "hint is " << hintReg.getNum() << ", ";
+      }
+      assert(hintReg.isPhysReg());
+      if (!regClassSet.contains(hintReg))
+        continue;
+      if (physSet.contains(hintReg))
+        continue;
+      std::cout << "assign hint " << hintReg.getNum() << "\n";
+      regAssign.assignPhysReg(hintReg);
+      return;
+    }
+
+    // Try to assign any other register in the register class
+    // This respects the register order of the DSL RegClass
+    for (auto *archReg : regClass.regs) {
+      if (physSet.contains(archReg->reg)) {
+        continue;
+      }
+      std::cout << "assign " << archReg->name << "\n";
+      regAssign.assignPhysReg(archReg->reg);
+      return;
+    }
+
     std::cout << "no phys reg available\n";
-    regAssign.kind = RegAlloc::Assignment::NO_REG;
+    regAssign.kind = RegAssignment::Assignment::NO_REG;
   }
 
   void spillGlobal(Reg reg) {
@@ -258,10 +336,12 @@ class ColoringRegAllocPass : public IRPass<Function> {
     }
   }
 
-  void invalidate(IRInfo<Function> &info) override { info.retract<RegAlloc>(); }
+  void invalidate(IRInfo<Function> &info) override {
+    info.retract<RegAssignment>();
+  }
 
 private:
-  RegAlloc alloc;
+  RegAssignment assignment;
   PhysLiveSet physSet;
   VLiveSet virtSet;
   std::vector<Reg> eliminationOrder;

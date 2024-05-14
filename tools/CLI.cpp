@@ -77,14 +77,15 @@ int main(int argc, char *argv[]) {
     funcPipeline.addPass(std::make_unique<PhiIsolationPass>());
     funcPipeline.addPass(std::make_unique<PhiDestructionPass>());
     funcPipeline.addPass(std::make_unique<SSADestructionPass>());
-
+    funcPipeline.addPass(std::make_unique<riscv::PreRAOptPass>());
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<PrintLiveGraphPass>());
     funcPipeline.addPass(std::make_unique<ColoringRegAllocPass>());
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<RegRewritePass>());
+    funcPipeline.addPass(std::make_unique<PrintIRPass>());
     funcPipeline.addPass(std::make_unique<riscv::FrameLoweringPass>());
-    funcPipeline.addPass(std::make_unique<riscv::PostRALowering>());
+    funcPipeline.addPass(std::make_unique<riscv::PostRALoweringPass>());
     funcPipeline.addPass(std::make_unique<PrintIRPass>());
   }
 

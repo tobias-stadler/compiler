@@ -210,8 +210,8 @@ public:
   FunctionPipelinePass(IRPipeline<Function> &pipeline) : pipeline(pipeline) {}
   const char *name() override { return "FunctionPipelinePass"; }
   void run(Program &prog, IRInfo<Program> &info) override {
-    for (auto &func : prog.functions) {
-      pipeline.run(*func);
+    for (auto &func : prog.functions()) {
+      pipeline.run(func);
     }
   }
 

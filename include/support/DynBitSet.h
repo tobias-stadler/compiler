@@ -127,7 +127,7 @@ public:
     return (h * (h - 1)) / 2 + l;
   }
 
-  TriBitSet(size_t sz) : bits(idx(sz, 0)) {}
+  TriBitSet(size_t sz) : bits(sz != 0 ? idx(sz, 0) : 0) {}
 
   void set(size_t i, size_t j) { bits.set(idx(i, j)); }
   void clr(size_t i, size_t j) { bits.clr(idx(i, j)); }

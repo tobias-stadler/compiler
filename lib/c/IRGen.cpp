@@ -172,8 +172,15 @@ public:
       auto *s = sym.getSymbol(d.ident, Symbol::Namespace::ORDINARY);
       assert(s);
       if (sym.scope().isFile()) {
-        auto &mem = ir.getProgram().staticMems.emplace_back(
-            std::make_unique<StaticMemory>());
+        if (s->getKind() != Symbol::EXTERN) {
+          continue;
+        }
+        auto &staticMem = ir.getProgram().createStaticMemory(
+            std::string(d.ident), GlobalDef::Linkage::EXTERNAL);
+        auto [size, align] = mem.getSizeAndAlignment(s->getType());
+        staticMem.size = size;
+        staticMem.align = align;
+        assert(!initializer);
       } else if (sym.scope().isBlock()) {
         auto &sInfo = storage.declareLocal(*s);
         auto tyKind = s->getType().getKind();
@@ -584,7 +591,8 @@ public:
   }
 
   ExpressionSemantics::Result semanticConvBool() {
-    ir->emitConstInt(MInt::zero(tmpOperand->ssaDef().type().intType().getBits()));
+    ir->emitConstInt(
+        MInt::zero(tmpOperand->ssaDef().type().intType().getBits()));
     ir->emitCmp(BrCond::ne(), *tmpOperand, ir.getDef());
     tmpOperand = &ir.getDef();
     return ExpressionSemantics::SUCCESS;

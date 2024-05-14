@@ -24,20 +24,25 @@ public:
 
   enum class Linkage { EXTERNAL, INTERNAL };
 
-  GlobalDef(Kind kind, std::string name)
-      : ExternSSADef(kind), name(std::move(name)) {}
+  GlobalDef(Kind kind, std::string name, Linkage linkage)
+      : ExternSSADef(kind), name(std::move(name)), linkage(linkage) {}
 
   const std::string &getName() const { return name; }
 
+  Linkage getLinkage() { return linkage; }
+
 private:
   std::string name;
+  Linkage linkage;
 };
 
 class StaticMemory : public GlobalDef {
 public:
-  StaticMemory() : GlobalDef(GLOBAL_STATIC_MEMORY, std::string()) {}
+  StaticMemory(std::string name, Linkage linkage)
+      : GlobalDef(GLOBAL_STATIC_MEMORY, std::move(name), linkage) {}
 
-  size_t size;
+  size_t size = 0;
+  Alignment align{0};
   std::vector<std::byte> initializer;
 };
 
@@ -48,16 +53,32 @@ public:
   Function *getFunction(std::string_view name);
   Function *createFunction(std::string name);
 
-public:
+  template <typename... Args> StaticMemory &createStaticMemory(Args... args) {
+    return *staticMemoryStorage.emplace_back(
+        std::make_unique<StaticMemory>(args...));
+  }
+
+  auto staticMemories() {
+    return staticMemoryStorage |
+           std::views::transform([](auto &e) -> StaticMemory & { return *e; });
+  }
+  auto functions() {
+    return functionStorage |
+           std::views::transform([](auto &e) -> Function & { return *e; });
+  }
+
+private:
   std::unordered_map<std::string_view, Function *> functionIndex;
-  std::vector<std::unique_ptr<Function>> functions;
-  std::vector<std::unique_ptr<StaticMemory>> staticMems;
+  std::vector<std::unique_ptr<Function>> functionStorage;
+  std::vector<std::unique_ptr<StaticMemory>> staticMemoryStorage;
 };
 
 class Function : public IntrusiveList<Block, Function>, public GlobalDef {
 
 public:
-  Function(std::string name) : GlobalDef(GLOBAL_FUNCTION, std::move(name)) {}
+  Function(std::string name)
+      : GlobalDef(GLOBAL_FUNCTION, std::move(name),
+                  GlobalDef::Linkage::EXTERNAL) {}
 
   Block &getEntry() {
     assert(!empty());
@@ -254,11 +275,13 @@ public:
   using iterator = Operand *;
 
   iterator begin() { return operands; }
-  iterator end() { return operands + capacity; }
+  iterator end() { return operands + getNumOperands(); }
   iterator def_begin() { return operands; }
   iterator def_end() { return other_begin(); }
   iterator other_begin() { return operands + numDefs; }
   iterator other_end() { return end(); }
+  auto defs() { return Range{def_begin(), def_end()}; }
+  auto others() { return Range{other_begin(), other_end()}; }
 
   Instr(unsigned kind) : kind(kind) {}
   Instr(const Instr &o) = delete;
@@ -267,10 +290,8 @@ public:
   unsigned getKind() { return kind; }
 
   unsigned getNumOperands() { return numDefs + numOther; }
-
   unsigned getNumDefs() { return numDefs; }
-
-  unsigned getNumOther() { return numOther; }
+  unsigned getNumOthers() { return numOther; }
 
   Operand &getDef(unsigned n = 0) {
     assert(numDefs > n);

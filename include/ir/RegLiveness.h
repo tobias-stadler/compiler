@@ -378,7 +378,7 @@ class PrintLiveIntervalsPass : public IRPass<Function> {
 class PhysLiveSet {
 public:
   PhysLiveSet() {}
-  PhysLiveSet(size_t sz) : bits(sz) {}
+  PhysLiveSet(size_t sz) : bits(sz + 1) {}
 
   void insert(Reg reg) {
     assert(reg.isPhysReg());
@@ -452,7 +452,7 @@ public:
     using value_type = Reg;
     using difference_type = std::ptrdiff_t;
 
-    iterator() : it(nullptr) {}
+    iterator() {}
     iterator(IdxSet::iterator it) : it(it) {}
 
     Reg operator*() const { return Reg::vReg(*it); }
@@ -540,6 +540,7 @@ public:
     VLive(size_t numPhysRegs) : phys(numPhysRegs) {}
     PhysLiveSet phys;
     std::vector<Reg> virt;
+    std::vector<Reg> coloringHints;
     bool ignore = true;
     size_t degree;
   };
@@ -639,6 +640,15 @@ public:
                  neighbor_iterator(*this, v.virt.end())};
   }
 
+  void addColoringHint(Reg r1, Reg r2) {
+    if (r1.isVReg()) {
+      vRegs[r1].coloringHints.push_back(r2);
+    }
+    if (r2.isVReg()) {
+      vRegs[r2].coloringHints.push_back(r1);
+    }
+  }
+
   void ignore(Reg reg) {
     auto &v = vRegs[reg];
     assert(!v.ignore);
@@ -670,7 +680,7 @@ class LiveGraphPass : public IRPass<Function> {
     arch = &info.getArch();
     flow = &info.query<LiveFlow>();
     size_t numVRegs = func.getRegInfo().getNumVRegs();
-    size_t numPhysRegs = arch->getArchRegs().size() + 1;
+    size_t numPhysRegs = arch->getArchRegs().size();
     graph = std::make_unique<LiveGraph>(numVRegs, numPhysRegs);
     LiveSet live(numVRegs, numPhysRegs);
     for (auto &block : func) {
@@ -711,6 +721,10 @@ class LiveGraphPass : public IRPass<Function> {
             continue;
           live.insert(reg);
         }
+      }
+      if (instr.isCopy()) {
+        graph->addColoringHint(instr.getOperand(0).reg(),
+                               instr.getOperand(1).reg());
       }
     }
   }

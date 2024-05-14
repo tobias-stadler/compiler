@@ -32,19 +32,20 @@ private:
 class FrameLayout {
 public:
   FrameDef &createFrameEntry(size_t size, Alignment align) {
-    auto newEntry = std::make_unique<FrameDef>(entries.size(), size, align);
+    auto newEntry =
+        std::make_unique<FrameDef>(entryStorage.size(), size, align);
     FrameDef *entry = newEntry.get();
-    entries.push_back(std::move(newEntry));
+    entryStorage.push_back(std::move(newEntry));
     return *entry;
   }
 
-  auto entryRange() {
-    return entries |
+  auto entries() {
+    return entryStorage |
            std::views::transform([](auto &e) -> FrameDef & { return *e; });
   }
 
-  size_t getNumEntries() { return entries.size(); }
+  size_t getNumEntries() { return entryStorage.size(); }
 
 private:
-  std::vector<std::unique_ptr<FrameDef>> entries;
+  std::vector<std::unique_ptr<FrameDef>> entryStorage;
 };

@@ -4,15 +4,19 @@ let X0 = Reg {
   let alias = token { "zero" }
 }
 let X1 = Reg {
+  let noLiveness = bool { true }
   let alias = token { "ra" }
 }
 let X2 = Reg {
+  let noLiveness = bool { true }
   let alias = token { "sp" }
 }
 let X3 = Reg {
+  let noLiveness = bool { true }
   let alias = token { "gp" }
 }
 let X4 = Reg {
+  let noLiveness = bool { true }
   let alias = token { "tp" }
 }
 let X5 = Reg {
@@ -98,8 +102,16 @@ let X31 = Reg {
 }
 
 let GPR = RegClass {
-  let regs = dsl_list { X5 X6 X7 X28 }
-  let regs2 = dsl_list { X5 X6 X7 X28 X29 X30 X31 }
+  let regs = dsl_list {
+    X5 X6 X7 X28 X29 X30 X31
+    X10 X11 X12 X13 X14 X15 X16 X17
+    X8 X9 X18 X19 X20 X21 X22 X23 X24 X25 X26 X27
+  }
+  let regs2 = dsl_list {
+    X5 X6 X7 X28 X29 X30 X31
+    X10 X11 X12 X13 X14 X15 X16 X17
+    X8 X9 X18 X19 X20 X21 X22 X23 X24 X25 X26 X27
+  }
 }
 
 let LUI = Instr {

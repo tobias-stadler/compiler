@@ -54,8 +54,8 @@ protected:
   void dispatchDefault(Operand &op) { impl().visitOperand(op); }
 
   void visitProgram(Program &prog) {
-    for (auto &f : prog.functions) {
-      dispatch(*f);
+    for (auto &f : prog.functions()) {
+      dispatch(f);
     }
   }
 

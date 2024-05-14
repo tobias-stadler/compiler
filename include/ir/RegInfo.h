@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ir/Operand.h"
+#include <cassert>
 #include <memory>
 
 class RegDefUseRoot : public ExternSSADef {
@@ -9,15 +10,15 @@ class RegDefUseRoot : public ExternSSADef {
 
 public:
   static bool is_impl(const ExternSSADef &o) { return o.getKind() == FUNC_REG; }
-  RegDefUseRoot() : ExternSSADef(FUNC_REG) {}
+  RegDefUseRoot() : ExternSSADef(FUNC_REG) { assert(defUseChain().isLinked()); }
 
   auto def_begin() {
-    return DefUseChain::iterator<true, false>(&defUseChain());
+    return ++DefUseChain::iterator<true, false>(&defUseChain());
   }
   auto def_end() { return DefUseChain::iterator<true, false>(nullptr); }
 
   auto use_begin() {
-    return DefUseChain::iterator<false, true>(&defUseChain());
+    return ++DefUseChain::iterator<false, true>(&defUseChain());
   }
   auto use_end() { return DefUseChain::iterator<false, true>(nullptr); }
 
@@ -28,6 +29,47 @@ public:
   auto end() { return DefUseChain::iterator<>(&defUseChain()); }
 
   size_t count() { return defUseChain().count(); }
+  bool empty() { return defUseChain().empty(); }
+
+  size_t count_defs() {
+    size_t cnt = 0;
+    for (auto &op : defs()) {
+      ++cnt;
+    }
+    return cnt;
+  }
+
+  size_t count_uses() {
+    size_t cnt = 0;
+    for (auto &op : uses()) {
+      ++cnt;
+    }
+    return cnt;
+  }
+
+  Operand *getSingleDef() {
+    auto *def = defUseChain().chPrev;
+    // First CCW node must be a def
+    if (!def->operand().isRegDef()) {
+      return nullptr;
+    }
+    // Second CCW node must not be a def
+    if (def->chPrev->operand().isRegDef()) {
+      return nullptr;
+    }
+    return &def->operand();
+  }
+
+  void replace(Reg reg) {
+    assert(defUseChain().isLinked());
+    for (DefUseChain *curr = defUseChain().chNext; curr != &defUseChain();) {
+      DefUseChain &tmp = *curr;
+      curr = curr->chNext;
+      // TODO: direct defUse chain splicing
+      tmp.operand().regDefUse().replace(reg);
+    }
+    assert(empty());
+  }
 
 private:
   SSAType *ssaType = nullptr;

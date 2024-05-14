@@ -307,6 +307,9 @@ public:
     insertDefUse();
   }
 
+  bool isDef();
+  bool isUse();
+
 private:
   void insertDefUse();
 };
@@ -797,3 +800,7 @@ DefUseChain::iterator<DEF, USE>::operator++() {
   }
   return *this;
 }
+
+inline bool RegDefUse::isDef() { return operand().isRegDef(); }
+
+inline bool RegDefUse::isUse() { return operand().isRegUse(); }

@@ -78,9 +78,9 @@ void PrintIRVisitor::printRegClass(unsigned kind) {
 }
 
 void PrintIRVisitor::visitProgram(Program &prog) {
-  for (auto &f : prog.functions) {
+  for (auto &f : prog.functions()) {
     std::cout << "---\n";
-    dispatch(*f);
+    dispatch(f);
     std::cout << "---\n";
   }
 }
