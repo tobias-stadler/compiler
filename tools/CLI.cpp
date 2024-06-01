@@ -59,34 +59,34 @@ int main(int argc, char *argv[]) {
   funcPipeline.addLazyPass(std::make_unique<LiveIntervalsPass>());
   funcPipeline.addLazyPass(std::make_unique<LiveGraphPass>());
 
-  funcPipeline.addPass(std::make_unique<PrintIRPass>());
+  funcPipeline.addPass(std::make_unique<IRPrinterPass>());
   // pipeline.addPass(std::make_unique<PrintDominatorTreePass>());
   bool doISel = true;
   bool doRegAlloc = true;
   bool doAsmPrint = true;
   if (doISel) {
     funcPipeline.addPass(std::make_unique<riscv::ABILoweringPass>());
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
     funcPipeline.addPass(std::make_unique<InstrExpansionPass>(expansion));
     funcPipeline.addPass(std::make_unique<InstrCombinePass>(combine));
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
     funcPipeline.addPass(std::make_unique<InstrSelectPass>(isel));
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
   }
   if (doRegAlloc && doISel) {
     funcPipeline.addPass(std::make_unique<PhiIsolationPass>());
     funcPipeline.addPass(std::make_unique<PhiDestructionPass>());
     funcPipeline.addPass(std::make_unique<SSADestructionPass>());
     funcPipeline.addPass(std::make_unique<riscv::PreRAOptPass>());
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
     funcPipeline.addPass(std::make_unique<PrintLiveGraphPass>());
     funcPipeline.addPass(std::make_unique<ColoringRegAllocPass>());
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
     funcPipeline.addPass(std::make_unique<RegRewritePass>());
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
     funcPipeline.addPass(std::make_unique<riscv::FrameLoweringPass>());
     funcPipeline.addPass(std::make_unique<riscv::PostRALoweringPass>());
-    funcPipeline.addPass(std::make_unique<PrintIRPass>());
+    funcPipeline.addPass(std::make_unique<IRPrinterPass>());
   }
 
   progPipeline.addPass(std::make_unique<FunctionPipelinePass>(funcPipeline));

@@ -225,7 +225,10 @@ private:
 class PostRALoweringPass : public IRPass<Function>,
                            public IRVisitor<PostRALoweringPass> {
 public:
-  void run(Function &func, IRInfo<Function> &info) override { dispatch(func); }
+  void run(Function &func, IRInfo<Function> &info) override {
+    this->func = &func;
+    dispatch(func);
+  }
 
   void visitInstr(Instr &instr) {
     switch (instr.getKind()) {
@@ -236,6 +239,9 @@ public:
     case BGE:
     case BGEU:
       lowerCondBr(instr);
+      break;
+    case JAL:
+      lowerJmp(instr);
       break;
     case Instr::COPY:
       lowerCopy(instr);
@@ -253,22 +259,33 @@ public:
     i.deleteThis();
   }
 
+  void lowerJmp(Instr &i) {
+    assert(i.getOperand(0).reg() == X0);
+    if (&i.getParent().getNextNode() ==
+        &i.getOperand(1).ssaUse().getDef().ssaDefBlock()) {
+      i.deleteThis();
+      return;
+    }
+    // FIXME: branch relaxation
+  }
+
   void lowerCondBr(Instr &i) {
-    Instr *newBr = new Instr(i.getKind());
-    newBr->allocateOperands(3);
+    Instr *newBr = func->createInstr(i.getKind(), 3);
     newBr->addOperand(i.getOperand(0));
     newBr->addOperand(i.getOperand(1));
-    newBr->emplaceOperand<Operand::SSA_USE>(i.getOperand(2).ssaUse().getDef());
-    Instr *newJmp = new Instr(JAL);
-    newJmp->allocateOperands(2);
+    newBr->addOperand(i.getOperand(2));
+    i.insertPrev(newBr);
+    Instr *newJmp = func->createInstr(JAL, 2);
     newJmp->emplaceOperand<Operand::REG_USE>(X0);
     newJmp->addOperand(i.getOperand(3));
-    i.insertPrev(newBr);
     i.insertPrev(newJmp);
+    lowerJmp(*newJmp);
     i.deleteThis();
   }
 
   const char *name() override { return "RiscVPostRALoweringPass"; }
+
+  Function *func;
 };
 
 class FrameLoweringPass : public IRPass<Function> {

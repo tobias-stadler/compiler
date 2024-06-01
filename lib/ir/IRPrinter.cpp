@@ -111,6 +111,10 @@ void PrintIRVisitor::visitInstr(Instr &instr) {
     std::cout << " ";
     dispatch(op);
   }
+  if (instr.isVariadic()) {
+    std::cout << " ";
+    dispatch(instr.getChainOperand());
+  }
 }
 
 void PrintIRVisitor::visitOperand(Operand &op) {

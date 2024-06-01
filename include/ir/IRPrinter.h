@@ -59,9 +59,9 @@ protected:
   std::function<callback_t> preInstrCallback = [](Instr &) {};
 };
 
-class PrintIRPass : public IRPass<Function> {
+class IRPrinterPass : public IRPass<Function> {
 public:
-  const char *name() { return "PrintIRPass"; }
+  const char *name() { return "IRPrinterPass"; }
 
   void advertise(IRInfo<Function> &info) { info.advertise<PrintIRVisitor>(); }
 
