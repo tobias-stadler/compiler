@@ -1,14 +1,16 @@
-This repository contains my work-in-progress optimizing compiler framework.
+This repository contains an optimizing compiler framework developed from scratch.
 
 Main components:
-- flexible IR that supports SSA-form for the middle-end and register-form for the back-end
+- flexible intermediate representation (IR) with support for static single assignment form
 - Pass-based framework for optimization and lowering
 - custom DSL for IR rewriting and backend specification
 - C language frontend
 - RISC-V backend
+
+This project is very much work-in-progress. The primary design goals are simplicity and consistency: a single flexible IR should take the code from the AST to the final assembly code.
 # Architecture
 ## IR
-A Function is contains as an intrusive linked-list of basic blocks, which contains an intrusive linked-list of instructions.
+A function contains an intrusive linked-list of basic blocks, which contains an intrusive linked-list of instructions.
 Each instruction contains an opcode and an array of operands.
 Operands can be of many different types.
 The most important are:
@@ -17,28 +19,9 @@ The most important are:
 - SSAUse: reference to an SSA definition
 - Reg: virtual or physical register
 - MInt: arbitrary width (<=64 bits) two's complement integer
+- imm32: 32-bit signed immediate
 
-SSA and register operands maintain def-use chains that allow for look-up of all related definition and use operands.
-## C frontend
-Lexer:
-- hand-written two-layer state-machine
-Preprocessor:
-- fully "pull-based": tokens are preprocessed only when demanded by the parser
-Parser:
-- hand-written recursive descent parser 
-- operator precedence parsing for expressions
-- fully "LL(1)": only requires Lexer support for next() and peek()
-- no backtracking
-- some integrated semantic analysis: declarations are directly parsed into C types, the symbol table is populated
-- error recovery features: dump source location and parser recursion context
-IR Generation:
-- lazy SSA construction using approach by M. Braun et al.
-
-The goal is to fully implement C99. The Lexer, Preprocessor, Parser and AST already support nearly all language constructs (see TODO section).
-IR generation currently only supports integer expressions, structured control flow, function calls with register-sized datatypes, basic structs and unions.
-## RISC-V backend
-- instruction selector currently supports RV32I
-- emits textual GNU assembly
+SSA and register operands maintain def-use chains that allow look-up of all related definition and use operands.
 ## DSL
 `tools/dsl/` contains a compiler for a custom declarative DSL that is used for architecture specification, IR pattern matching and rewriting.
 DSL code is compiled to C++ code.
@@ -59,26 +42,51 @@ ir_pat {
   }
 }
 ```
-More complicated behaviour can be specified using the built-in templating facilities and inline C++ code.
+More complicated behaviour can be specified using built-in templating facilities and inline C++ code.
 ## Instruction Selection
 Instruction selection is performed using the rewriting system explained above. Multiple passes over the IR are performed and different sets of patterns are applied during each pass.
 Main passes:
-- InstrExpansionPass: canonicalize and legalize instructions to ensure that the instruction selection patterns will match later
+- InstrExpansionPass: canonicalize and legalize instructions to ensure that later the instruction selection patterns will match
 - InstrCombinePass: apply peephole optimization patterns until a fixed-point is reached
 - InstrSelectPass: apply the instruction selection patterns
 ## Register Allocation
 The current register allocator is based on a Chaitin-Briggs-style iterated optimistic graph coloring approach.
+
 Main passes:
 - LiveFlowPass: calculate live-in and live-out registers of each block using dataflow analysis
 - LiveGraphPass: construct register interference graph (triangular bitset + adjacency lists)
 - ColoringRegAllocPass: find node elimination order based on degree and spill cost, assign registers, insert spill code
 - RegRewritePass: rewrite virtual registers to the physical registers assigned by the allocator
+
 Current implementation status:
 - COPY instructions are used as hints for guided coloring
 - Spill cost estimation based on the number of register uses and interference graph degree
 - All spilling is global
-Before register allocation, SSA form is deconstructed by first restoring conventional SSA-form (by splitting the live-ranges of all PHI defs and uses using COPYs) and then replacing the PHI by a virtual register with multiple definitions.
+
+Before register allocation, SSA form is deconstructed by first restoring conventional SSA-form (by splitting the live-ranges of all PHI defs and uses using COPYs) and then lowering the PHI to a virtual register.
 To facilitate liveness analysis, all other SSA defs are also lowered to virtual registers.
+## C frontend
+- Lexer:
+  - hand-written two-layer state-machine
+- Preprocessor:
+  - fully "pull-based": tokens are preprocessed only on demand
+- Parser:
+  - hand-written recursive descent parser 
+  - operator precedence parsing for expressions
+  - fully "LL(1)": only requires Lexer support for next() and peek()
+  - no backtracking
+  - some integrated semantic analysis:
+    - declarations are directly parsed into types
+    - symbol table is populated while parsing
+  - error recovery: dump source location and parser recursion context
+- IR Generation:
+  - lazy SSA construction using approach by M. Braun et al.
+
+The goal is to fully implement C99. The Lexer, Preprocessor, Parser and AST already support nearly every language construct (see TODO section).
+IR generation currently only supports integer expressions, structured control flow, function calls with register-sized datatypes, basic structs/unions.
+## RISC-V backend
+- instruction selector currently supports RV32I
+- emits textual GNU assembly
 # Example
 ```c
 int calc(int a, int b) {
