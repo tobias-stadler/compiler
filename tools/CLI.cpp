@@ -37,8 +37,7 @@ int main(int argc, char *argv[]) {
   c::Parser p(ctx, ppLex, sym);
 
   auto ast = p.parseTranslationUnit();
-  if (!ast || ppLex.peekKind() != c::Token::END) {
-    p.printErrCtx(std::cerr);
+  if (!ast || ppLex.hasNext()) {
     return EXIT_FAILURE;
   }
   std::cout << "Parsing finished\n";

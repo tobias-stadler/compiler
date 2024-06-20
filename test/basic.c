@@ -4,10 +4,10 @@ static int global_x;
 
 int do_sth(int a, int b) { return a + b; }
 
-struct goofy {
+struct somestruct {
   char x;
   int y;
-  struct goofy *p;
+  struct somestruct *p;
 };
 typedef enum { A, ASDF = 3, B, C } b;
 
@@ -33,17 +33,17 @@ int main() {
     x = 0;
   }
 
-  struct goofy nah = (struct goofy){.x = 3};
+  struct somestruct obj = (struct somestruct){.x = 3};
   int n2 = sizeof(int) * x;
 
   do
     x += -0xff;
   while (x);
 
-  struct goofy *(*gf)(int);
+  struct somestruct *(*gf)(int);
   b bv;
 
-  struct goofy s;
+  struct somestruct s;
   s.x = 69;
   s.x++;
   (&s)->y = 42;
@@ -70,5 +70,6 @@ int main() {
 #endif
       ;
 
+  int FUNC = 1;
   return FUNC(A, B);
 }
