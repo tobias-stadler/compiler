@@ -83,9 +83,9 @@ To facilitate liveness analysis, all other SSA defs are also lowered to virtual 
   - lazy SSA construction using approach by M. Braun et al.
 
 The goal is to fully implement C99. The Lexer, Preprocessor, Parser and AST already support nearly every language construct (see TODO section).
-IR generation currently only supports integer expressions, structured control flow, function calls with register-sized datatypes, basic structs/unions.
+IR generation currently only supports integer expressions (+ address-of/dereference), structured control flow, function calls with register-sized datatypes, basic structs/unions.
 ## RISC-V backend
-- instruction selector currently supports RV32I
+- instruction selector currently supports RV32I instruction set
 - emits textual GNU assembly
 # Example
 ```c
@@ -161,8 +161,6 @@ JALR def(X0) X1 imm32(0) X10
     - blocker: const-expression evaluation
     - ABI for aggregates
     - ...
-## IR
-- replace Instr allocator with bump pointer allocator
 ## Register Allocation
 - optimized spilling: live-range splitting, rematerialization (e.g. constants)
 - better spill cost heuristic (loop analysis)
