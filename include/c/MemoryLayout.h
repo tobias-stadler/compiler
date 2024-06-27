@@ -2,6 +2,7 @@
 
 #include "c/Type.h"
 #include "ir/Alignment.h"
+#include "support/RTTI.h"
 #include "support/Utility.h"
 
 namespace c {
@@ -50,7 +51,7 @@ public:
   }
 
   StructLayout &getStructLayout(StructType &type) {
-    auto [it, succ] = structCache.try_emplace(&type);
+    auto [it, succ] = structLayoutCache.try_emplace(&type);
     auto &structLayout = it->second;
     if (!succ) {
       return structLayout;
@@ -76,9 +77,9 @@ public:
     return structLayout;
   }
 
-  void clearCache() { structCache.clear(); }
+  void clearCache() { structLayoutCache.clear(); }
 
 private:
-  std::unordered_map<Type *, StructLayout> structCache;
+  std::unordered_map<Type *, StructLayout> structLayoutCache;
 };
 } // namespace c

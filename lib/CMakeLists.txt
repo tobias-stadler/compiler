@@ -24,6 +24,7 @@ c/Type.cpp
 c/IRGen.cpp
 c/ASTPrinter.cpp
 c/Semantics.cpp
+c/AST.cpp
 ir/IR.cpp
 ir/SSAType.cpp
 ir/IRPrinter.cpp

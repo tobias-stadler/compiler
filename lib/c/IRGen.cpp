@@ -7,10 +7,7 @@
 #include "c/Type.h"
 #include "ir/IR.h"
 #include "ir/IRBuilder.h"
-#include "ir/InstrBuilder.h"
 #include "ir/LazySSABuilder.h"
-#include "support/RefCount.h"
-#include "support/Utility.h"
 #include <cassert>
 #include <cstdlib>
 #include <memory>
@@ -18,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <iostream>
 
 namespace c {
 

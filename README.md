@@ -82,7 +82,7 @@ To facilitate liveness analysis, all other SSA defs are also lowered to virtual 
 - IR Generation:
   - lazy SSA construction using approach by M. Braun et al.
 
-The goal is to fully implement C99. The Lexer, Preprocessor, Parser and AST already support nearly every language construct (see TODO section).
+The goal is to reliably compile reasonable C99 code, but supporting all features and full conformance is out of scope. Most language constructs are already implemented in Lexer, Preprocessor, Parser and AST, but have not yet been tested extensively (see TODO section for a list of known issues).
 IR generation currently only supports integer expressions (+ address-of/dereference), structured control flow, function calls with register-sized datatypes, basic structs/unions.
 ## RISC-V backend
 - instruction selector currently supports RV32I instruction set

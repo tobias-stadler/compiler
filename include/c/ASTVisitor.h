@@ -145,7 +145,10 @@ protected:
   Derived &impl() { return static_cast<Derived &>(*this); }
 
   void visitNullptr() {}
+
+  // Always fallback to this when more concrete handler is unimplemented
   void visit(AST &ast) { impl().visit(ast); }
+
   void visitIntConst(IntConstAST &ast) { impl().visit(ast); }
   void visitVar(VarAST &ast) { impl().visit(ast); }
   void visitBinop(BinopAST &ast) { impl().visit(ast); }

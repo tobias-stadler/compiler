@@ -2,7 +2,7 @@
 
 #include "c/Type.h"
 #include "ir/IR.h"
-#include "support/RefCount.h"
+#include <map>
 #include <unordered_map>
 
 namespace c {

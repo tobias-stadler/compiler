@@ -1,12 +1,12 @@
 #include "ir/IRPrinter.h"
-#include "ir/IR.h"
-#include "ir/IRVisitor.h"
-#include "support/RTTI.h"
-#include "support/Utility.h"
+
 #include <cassert>
 #include <iostream>
-#include <map>
 #include <optional>
+
+#include "ir/IR.h"
+#include "support/RTTI.h"
+#include "support/Utility.h"
 
 const IRInfoID NumberingIRVisitor::ID = nullptr;
 const IRInfoID PrintIRVisitor::ID = nullptr;

@@ -1,6 +1,6 @@
 #include "c/Type.h"
-#include "support/RefCount.h"
 #include <cassert>
+#include "support/RTTI.h"
 
 namespace c {
 

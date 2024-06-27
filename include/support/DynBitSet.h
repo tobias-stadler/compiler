@@ -112,7 +112,7 @@ private:
   }
 };
 
-class TriBitSet {
+class TriangularBitSet {
 public:
   static constexpr size_t idx(size_t a, size_t b) {
     assert(a != b);
@@ -127,7 +127,7 @@ public:
     return (h * (h - 1)) / 2 + l;
   }
 
-  TriBitSet(size_t sz) : bits(sz != 0 ? idx(sz, 0) : 0) {}
+  TriangularBitSet(size_t sz) : bits(sz != 0 ? idx(sz, 0) : 0) {}
 
   void set(size_t i, size_t j) { bits.set(idx(i, j)); }
   void clr(size_t i, size_t j) { bits.clr(idx(i, j)); }

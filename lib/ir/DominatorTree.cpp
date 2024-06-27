@@ -1,4 +1,5 @@
 #include "ir/DominatorTree.h"
+#include "ir/IRPrinter.h"
 
 const IRInfoID DominatorTree::ID = nullptr;
 

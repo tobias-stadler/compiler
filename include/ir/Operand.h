@@ -66,31 +66,7 @@ public:
   static constexpr BrCond ge() { return BrCond(GE); }
   static constexpr BrCond geu() { return BrCond(GEU); }
 
-  static constexpr const char *kindName(Kind kind) {
-    switch (kind) {
-    case EQ:
-      return "eq";
-    case NE:
-      return "ne";
-    case LT:
-      return "lt";
-    case LTU:
-      return "ltu";
-    case LE:
-      return "le";
-    case LEU:
-      return "leu";
-    case GT:
-      return "gt";
-    case GTU:
-      return "gtu";
-    case GE:
-      return "ge";
-    case GEU:
-      return "geu";
-    }
-    return "?";
-  }
+  static const char *kindName(Kind kind);
 
   constexpr BrCond negate() {
     switch (kind) {

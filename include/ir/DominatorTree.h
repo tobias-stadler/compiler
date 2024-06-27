@@ -1,15 +1,11 @@
 #pragma once
 
-#include <algorithm>
-#include <cassert>
-#include <iostream>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "ir/IR.h"
 #include "ir/IRPass.h"
-#include "ir/IRPrinter.h"
 
 class DominatorTree {
 public:

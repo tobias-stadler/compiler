@@ -479,4 +479,5 @@ const char *Token::kindName(Kind kind) {
   }
   return "<illegal>";
 }
+
 } // namespace c

@@ -3,7 +3,6 @@
 #include "c/Lexer.h"
 #include "c/Symbol.h"
 #include "c/Type.h"
-#include "support/RefCount.h"
 #include <algorithm>
 #include <array>
 #include <cassert>

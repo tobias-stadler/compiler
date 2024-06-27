@@ -3,9 +3,6 @@
 #include "c/AST.h"
 #include "c/Symbol.h"
 #include "c/Type.h"
-#include "ir/IR.h"
-#include "support/RefCount.h"
-#include <algorithm>
 #include <cassert>
 
 namespace c {
@@ -228,4 +225,5 @@ private:
   Category category;
   Handler *handler;
 };
+
 } // namespace c

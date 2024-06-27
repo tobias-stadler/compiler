@@ -126,6 +126,8 @@ public:
 
 private:
   struct ReplacementCtx {
+    // If lex is set to nullptr, only the tokens in the stack are available for
+    // replacement
     ReplacementCtx(PPLexer &pp, Lex *lex) : pp(pp), lex(lex) {}
 
     std::vector<Token> gobbleArgument();
@@ -174,4 +176,5 @@ private:
   static std::unordered_map<std::string_view, Token::Kind> keywords;
   static std::unordered_map<std::string_view, PPDirective> ppKeywords;
 };
+
 } // namespace c

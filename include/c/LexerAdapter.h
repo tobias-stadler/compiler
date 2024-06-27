@@ -5,6 +5,7 @@
 
 namespace c {
 
+// Mix-in helper functions for Lexers that only provide next() and peek()
 template <typename DerivedT> class LL1Lexer {
 public:
   void drop() { impl().next(); }
@@ -57,12 +58,15 @@ public:
     }
   }
 
-  bool hasNext() { return !matchPeek(Token::END) && !matchPeek(Token::INVALID); }
+  bool hasNext() {
+    return !matchPeek(Token::END) && !matchPeek(Token::INVALID);
+  }
 
 private:
   DerivedT &impl() { return static_cast<DerivedT &>(*this); }
 };
 
+// Add peek() support for Lexers that only support next() by buffering 1 token
 template <typename BackOffT>
 class LL1LexerAdapter : public LL1Lexer<LL1LexerAdapter<BackOffT>> {
 public:
@@ -81,6 +85,8 @@ public:
   Token currTok;
 };
 
+// Lexer that returns tokens from a stack or from another lexer if the stack is
+// empty
 template <typename BackOffT>
 class StackLexerAdapter : public LL1Lexer<StackLexerAdapter<BackOffT>> {
 public:

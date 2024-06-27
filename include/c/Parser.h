@@ -4,8 +4,6 @@
 #include "c/Symbol.h"
 #include "c/Type.h"
 #include "support/ErrorRecovery.h"
-#include "support/RefCount.h"
-#include <cassert>
 #include <string_view>
 
 namespace c {
@@ -40,11 +38,6 @@ enum class Precedence : int {
 
 class Parser {
 public:
-  Parser(ASTContext &ctx, PPLexer &lex, SymbolTable &sym)
-      : lex(lex), sym(sym), ctx(ctx) {
-    sym.clearScopeStack();
-  }
-
   enum class ErrCtx {
     EXPRESSION,
     DECLARATOR,
@@ -58,6 +51,11 @@ public:
     ST_FOR,
     ST_WHILE,
   };
+
+  Parser(ASTContext &ctx, PPLexer &lex, SymbolTable &sym)
+      : lex(lex), sym(sym), ctx(ctx) {
+    sym.clearScopeStack();
+  }
 
 public:
   ASTPtrResult parseLiteralNum();

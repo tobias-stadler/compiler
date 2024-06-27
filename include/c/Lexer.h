@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cassert>
-#include <cstdint>
 #include <ostream>
 #include <string_view>
 #include <unordered_map>
@@ -436,4 +435,5 @@ private:
     }
   }
 };
+
 } // namespace c

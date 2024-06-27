@@ -4,6 +4,7 @@
 #include "c/Type.h"
 
 #include <unordered_map>
+#include <iostream>
 
 namespace c {
 

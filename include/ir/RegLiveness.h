@@ -670,7 +670,7 @@ private:
   size_t numVRegs;
   size_t numPhysRegs;
 
-  TriBitSet adjVLive;
+  TriangularBitSet adjVLive;
 };
 
 class LiveGraphPass : public IRPass<Function> {
